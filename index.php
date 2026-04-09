@@ -3,13 +3,6 @@
 require_once __DIR__ . '/vendor/autoload.php';
 
 use Dotenv\Dotenv;
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\RequestException;
-
-// Initialize state
-$authStatus = null;
-$errorMsg = null;
-$client_id = null;
 
 try {
     // 1. Bootstrap .env
@@ -17,63 +10,11 @@ try {
     $dotenv->load();
 
     $api_key = $_ENV['FLATTRADE_API_KEY'] ?? $_ENV['API_KEY'] ?? '';
-    $raw_api_secret = $_ENV['FLATTRADE_API_SECRET'] ?? $_ENV['API_SECRET'] ?? '';
 
-    if (empty($api_key) || empty($raw_api_secret)) {
+    if (empty($api_key)) {
         throw new Exception("Missing FLATTRADE API credentials in the .env file.");
     }
 
-    // 2. Check if we are returning from Flattrade OAuth (Phase 2)
-    if (isset($_GET['request_code']) && !empty($_GET['request_code'])) {
-        $request_code = trim($_GET['request_code']);
-        
-        // Connect to Database
-        $dsn = "mysql:host=" . ($_ENV['DB_HOST'] ?? 'localhost') . ";dbname=" . ($_ENV['DB_NAME'] ?? '') . ";charset=utf8mb4";
-        $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-        // Compute the secure hash purely in the backend as mandated 
-        $hash_string = $api_key . $request_code . $raw_api_secret;
-        $api_secret_hash = hash('sha256', $hash_string);
-
-        // Exchange for token
-        $client = new Client(['timeout'  => 15.0]);
-        $response = $client->request('POST', 'https://authapi.flattrade.in/trade/apitoken', [
-            'json' => [
-                'api_key'      => $api_key,
-                'request_code' => $request_code,
-                'api_secret'   => $api_secret_hash 
-            ]
-        ]);
-
-        $data = json_decode($response->getBody()->getContents(), true);
-
-        if (!isset($data['status']) || $data['status'] !== 'Ok') {
-            throw new Exception($data['emsg'] ?? "Token exchange failed with Flattrade.");
-        }
-
-        $client_id = $data['client'] ?? '';
-        $access_token = $data['token'] ?? '';
-
-        if (empty($client_id) || empty($access_token)) {
-            throw new Exception("Flattrade API returned 'Ok' but payload lacked client_id or token.");
-        }
-
-        // Store the token safely
-        $sql = "INSERT INTO flattrade_tokens (client_id, access_token) 
-                VALUES (:client_id, :access_token) 
-                ON DUPLICATE KEY UPDATE 
-                access_token = VALUES(access_token),
-                updated_at = CURRENT_TIMESTAMP";
-                
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([
-            ':client_id' => $client_id,
-            ':access_token' => $access_token
-        ]);
-
-        $authStatus = 'success';
-    }
 } catch (Exception $e) {
     echo "<h1>Critical Error</h1><p>" . htmlspecialchars($e->getMessage()) . "</p>";
     exit;
@@ -95,7 +36,6 @@ try {
             --text-secondary: #94a3b8;
             --accent-color: #3b82f6;
             --accent-hover: #2563eb;
-            --success-color: #10b981;
         }
         * {
             box-sizing: border-box;
@@ -151,18 +91,6 @@ try {
             background-color: var(--accent-hover);
             transform: translateY(-1px);
         }
-        .success-box {
-            margin-top: 24px;
-            padding: 24px;
-            border-radius: 12px;
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid var(--success-color);
-        }
-        .success-box h2 {
-            color: var(--success-color);
-            font-size: 1.2rem;
-            margin-bottom: 8px;
-        }
     </style>
 </head>
 <body>
@@ -171,17 +99,9 @@ try {
         <h1>Flattrade OAuth Session Hub</h1>
         <p class="subtitle">Official Browser Redirection Flow</p>
 
-        <?php if ($authStatus === 'success'): ?>
-            <div class="success-box">
-                <h2>Authentication Successful!</h2>
-                <p>The <strong>request_code</strong> was successfully intercepted.<br>The SHA-256 validation completed securely, and the Access Token for Client ID <strong><?= htmlspecialchars($client_id) ?></strong> has been saved directly to your MySQL Database.</p>
-            </div>
-            <a href="index.php" class="btn" style="margin-top: 24px; background: rgba(255,255,255,0.1);">Return to Login</a>
-        <?php else: ?>
-            <!-- Proceed to Phase 1: Redirecting to Official Flattrade Auth Portal -->
-            <a href="https://auth.flattrade.in/?app_key=<?= htmlspecialchars($api_key) ?>" class="btn">Login with Flattrade</a>
-            <p style="font-size: 12px; margin-top: 16px; color: var(--text-secondary);">You will be securely redirected to Flattrade Pi context.</p>
-        <?php endif; ?>
+        <!-- Proceed to Phase 1: Redirecting to Official Flattrade Auth Portal -->
+        <a href="https://auth.flattrade.in/?app_key=<?= htmlspecialchars($api_key) ?>" class="btn">Login with Flattrade</a>
+        <p style="font-size: 12px; margin-top: 16px; color: var(--text-secondary);">You will be securely redirected to Flattrade Pi context.</p>
     </div>
 
 </body>
