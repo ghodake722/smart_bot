@@ -181,7 +181,45 @@ try {
         }
         @keyframes spin {
             to { transform: rotate(360deg); }
+        /* WebSocket Live Hub Area */
+        #ws-display {
+            margin-top: 16px;
+            background: rgba(16, 185, 129, 0.05); /* very soft green */
+            border: 1px solid var(--success-color);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
         }
+        #ws-display strong {
+            display: block;
+            margin-bottom: 8px;
+            color: var(--text-secondary);
+        }
+        #ws-time {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--success-color);
+            text-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+            font-variant-numeric: tabular-nums;
+        }
+        #ws-status {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 8px;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--error-color); /* Defaults to red (disconnected) */
+            margin-right: 6px;
+            box-shadow: 0 0 8px currentColor;
+        }
+        .status-dot.connected {
+            background: var(--success-color);
+        }
+        
     </style>
 </head>
 <body>
@@ -198,6 +236,13 @@ try {
     <div class="container">
         <h1>Flattrade OAuth Dashboard</h1>
         <p class="subtitle">Secure API Integration Engine</p>
+
+        <!-- Dynamic Real-Time TimeStamp Daemon Hub -->
+        <div id="ws-display">
+            <strong>Server Daemon Timestamp (IST)</strong>
+            <div id="ws-time">--:--:--</div>
+            <div id="ws-status"><span class="status-dot"></span>Connecting to ReactPHP Daemon...</div>
+        </div>
 
         <?php if (isset($_GET['success']) && $_GET['success'] == '1'): ?>
             <div class="msg-box success">
@@ -263,6 +308,52 @@ try {
                     }
                 });
             }
+
+            /* -------------------------------------
+               WebSocket Client Configuration
+               ------------------------------------- */
+            function initWebSocket() {
+                const wsTimeDisplay = document.getElementById('ws-time');
+                const wsStatusDisplay = document.getElementById('ws-status');
+                const host = window.location.hostname; // e.g. test.mytptd.com or 103...
+
+                // If running on HTTPS, you MUST reverse proxy wss:// to an SSL cert.
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                // Try wss://test.mytptd.com:8080/ if custom port SSL is somehow open!
+                // Otherwise user might use wss://test.mytptd.com/ws if proxy is mapped
+                let wsUrl = `${protocol}//${host}:8080/`;
+
+                const socket = new WebSocket(wsUrl);
+
+                socket.onopen = function() {
+                    wsStatusDisplay.innerHTML = `<span class="status-dot connected"></span>Live Sync Active`;
+                };
+
+                socket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'time_update') {
+                            wsTimeDisplay.textContent = data.timestamp;
+                        }
+                    } catch (e) {
+                        console.error('WebSocket parsing error:', e);
+                    }
+                };
+
+                socket.onclose = function() {
+                    wsStatusDisplay.innerHTML = `<span class="status-dot"></span>Connection Lost. Retrying...`;
+                    wsTimeDisplay.textContent = '--:--:--';
+                    // Reconnect aggressively if the server daemon drops
+                    setTimeout(initWebSocket, 3000);
+                };
+
+                socket.onerror = function(err) {
+                    console.error('WebSocket Error:', err);
+                };
+            }
+
+            // Fire up WebSocket
+            initWebSocket();
         });
     </script>
 
