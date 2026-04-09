@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set("Asia/Kolkata");
 // Load composer dependencies
 require_once __DIR__ . '/vendor/autoload.php';
 
@@ -241,8 +242,19 @@ try {
                         if (data.status === 'error') {
                             displayArea.innerHTML = `<span style="color: var(--error-color)">Error: ${data.message}</span>`;
                         } else {
-                            displayArea.innerHTML = `<strong>Margin Limits Fetched:</strong><hr style="opacity:0.2; margin: 10px 0;">
-                            <pre>${JSON.stringify(data.payload, null, 4)}</pre>`;
+                            const limits = data.payload;
+                            let html = `<h2 style="font-size:1.1rem; margin-bottom: 12px; color:var(--text-primary);">Margin Limits (IST)</h2>`;
+                            html += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 0.9rem;">`;
+                            html += `<div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px;">`;
+                            html += `<span style="color:var(--text-secondary)">Available Cash</span><br><strong style="font-size:1.1rem; color:var(--success-color)">₹${limits.cash || '0.00'}</strong></div>`;
+                            html += `<div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px;">`;
+                            html += `<span style="color:var(--text-secondary)">Margin Used</span><br><strong style="font-size:1.1rem; color:var(--error-color)">₹${limits.marginused || '0.00'}</strong></div>`;
+                            html += `<div><span style="color:var(--text-secondary)">Payin:</span> <strong style="float:right">₹${limits.payin || '0.00'}</strong></div>`;
+                            html += `<div><span style="color:var(--text-secondary)">Payout:</span> <strong style="float:right">₹${limits.payout || '0.00'}</strong></div>`;
+                            html += `<div><span style="color:var(--text-secondary)">Gross Exposure:</span> <strong style="float:right">₹${limits.grexpo || '0.00'}</strong></div>`;
+                            html += `<div><span style="color:var(--text-secondary)">M2M (urmtom):</span> <strong style="float:right">₹${limits.urmtom || '0.00'}</strong></div>`;
+                            html += `</div>`;
+                            displayArea.innerHTML = html;
                         }
                     } catch (e) {
                         loader.style.display = 'none';

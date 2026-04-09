@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set("Asia/Kolkata");
 require_once __DIR__ . '/vendor/autoload.php';
 
 use Dotenv\Dotenv;
@@ -44,7 +45,7 @@ try {
         'actid' => $user_id
     ];
 
-    $response = $client->request('POST', 'https://piconnect.flattrade.in/PiConnectTP/Limits', [
+    $response = $client->request('POST', 'https://piconnect.flattrade.in/PiConnectAPI/Limits', [
         'form_params' => [
             'jData' => json_encode($payload),
             'jKey' => $access_token
