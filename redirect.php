@@ -50,8 +50,12 @@ try {
         $bodyContents = $response->getBody()->getContents();
         $data = json_decode($bodyContents, true);
 
-        if (!isset($data['status']) || $data['status'] !== 'Ok') {
-            throw new Exception("Payload: " . $bodyContents);
+        // Flattrade API inconsistently returns 'stat' or 'status'
+        $isOk = (isset($data['status']) && $data['status'] === 'Ok') || (isset($data['stat']) && $data['stat'] === 'Ok');
+
+        if (!$isOk) {
+            $errorDetail = !empty($data['emsg']) ? $data['emsg'] : "Unknown API rejection.";
+            throw new Exception("API Rejected Exchange. Detail: " . $errorDetail . " | Full Payload: " . $bodyContents);
         }
 
         $client_id = $data['client'] ?? '';
