@@ -45,10 +45,11 @@ try {
         'actid' => $user_id
     ];
 
+    $raw_payload = 'jData=' . json_encode($payload) . '&jKey=' . $access_token;
     $response = $client->request('POST', 'https://piconnect.flattrade.in/PiConnectAPI/Limits', [
-        'form_params' => [
-            'jData' => json_encode($payload),
-            'jKey' => $access_token
+        'body' => $raw_payload,
+        'headers' => [
+            'Content-Type' => 'text/plain'
         ]
     ]);
 
