@@ -47,17 +47,18 @@ try {
             ]
         ]);
 
-        $data = json_decode($response->getBody()->getContents(), true);
+        $bodyContents = $response->getBody()->getContents();
+        $data = json_decode($bodyContents, true);
 
         if (!isset($data['status']) || $data['status'] !== 'Ok') {
-            throw new Exception($data['emsg'] ?? "Token exchange failed with Flattrade.");
+            throw new Exception("Payload: " . $bodyContents);
         }
 
         $client_id = $data['client'] ?? '';
         $access_token = $data['token'] ?? '';
 
         if (empty($client_id) || empty($access_token)) {
-            throw new Exception("Flattrade API returned 'Ok' but payload lacked client_id or token.");
+            throw new Exception("Flattrade API returned 'Ok' but payload lacked client_id or token. Payload: " . $bodyContents);
         }
 
         // Store the token safely
