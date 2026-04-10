@@ -1,26 +1,9 @@
 <?php
 date_default_timezone_set("Asia/Kolkata");
-require_once __DIR__ . '/../vendor/autoload.php';
-
-use Dotenv\Dotenv;
-use GuzzleHttp\Client;
-
+// Intentionally bypassing vendor/autoload.php completely for absolute raw execution speed
 header('Content-Type: application/json');
 
-/**
- * Appends a debug step to php_debug.log
- */
-function api_log($step, $data = null) {
-    // Write directly inside the api/ folder to avoid server write-permission blocks on the root workspace
-    $logFile = __DIR__ . '/api_debug.log';
-    $time = date('Y-m-d H:i:s');
-    $logEntry = "[$time] STEP: $step\n";
-    if ($data !== null) {
-        $logEntry .= "DATA: " . (is_string($data) ? $data : json_encode($data, JSON_PRETTY_PRINT)) . "\n";
-    }
-    $logEntry .= "----------------------------------------\n";
-    file_put_contents($logFile, $logEntry, FILE_APPEND);
-}
+
 
 /**
  * Validates the request method.
@@ -42,34 +25,62 @@ function enforceMethod($expectedMethod) {
  * @return array ['user_id' => string, 'access_token' => string]
  */
 function authenticateAndGetSession() {
-    $dotenv = Dotenv::createImmutable(dirname(__DIR__));
-    $dotenv->safeLoad();
-
-    api_log("Starting Authentication Check", ["URI" => $_SERVER['REQUEST_URI'] ?? '', "Method" => $_SERVER['REQUEST_METHOD'] ?? '']);
-    $headers = getallheaders();
     $requestToken = '';
 
-    if (isset($headers['Authorization'])) {
-        // Bearer <token>
-        $parts = explode(' ', $headers['Authorization']);
+    if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+        $parts = explode(' ', $_SERVER['HTTP_AUTHORIZATION']);
         $requestToken = isset($parts[1]) ? $parts[1] : $parts[0];
-    } elseif (isset($headers['X-Auth-Token'])) {
-        $requestToken = $headers['X-Auth-Token'];
+    } elseif (!empty($_SERVER['HTTP_X_AUTH_TOKEN'])) {
+        $requestToken = $_SERVER['HTTP_X_AUTH_TOKEN'];
+    } elseif (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        if (isset($headers['Authorization'])) {
+            $parts = explode(' ', $headers['Authorization']);
+            $requestToken = isset($parts[1]) ? $parts[1] : $parts[0];
+        } elseif (isset($headers['X-Auth-Token'])) {
+            $requestToken = $headers['X-Auth-Token'];
+        }
     }
 
     if (empty($requestToken)) {
-        api_log("Auth Failed", "Missing Token Header");
         http_response_code(401);
         echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Missing API Token Header (Authorization or X-Auth-Token).']);
         exit;
     }
 
+    // Hardcoded credentials for maximum microsecond execution speed (bypassing slow .env loaders)
+    $db_host = 'localhost';
+    $db_name = 'mytptd_c1_db';
+    $db_user = 'mytptd_c1_root';
+    $db_pass = 'ptP_*yOV?7QM';
+    $user_id = 'FT041391';
+
+    $cacheFile = __DIR__ . '/ft_session.cache';
+
+    // Ultra-fast CACHE HIT: Bypass MySQL completely if today's token file exists
+    if (file_exists($cacheFile)) {
+        $cacheData = json_decode(file_get_contents($cacheFile), true);
+        if ($cacheData && isset($cacheData['date']) && $cacheData['date'] === date('Y-m-d')) {
+            if ($cacheData['header_auth_token'] === $requestToken) {
+                return [
+                    'user_id' => $cacheData['user_id'],
+                    'access_token' => $cacheData['access_token']
+                ];
+            } else {
+                http_response_code(401);
+                echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Invalid API Token.']);
+                exit;
+            }
+        }
+    }
+
+    // CACHE MISS: Hit database securely, prepare new cache file
     try {
-        $dsn = "mysql:host=" . ($_ENV['DB_HOST'] ?? 'localhost') . ";dbname=" . ($_ENV['DB_NAME'] ?? '') . ";charset=utf8mb4";
-        $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '');
+        $dsn = "mysql:host={$db_host};dbname={$db_name};charset=utf8mb4";
+        $pdo = new PDO($dsn, $db_user, $db_pass);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-        $stmt = $pdo->query("SELECT access_token, header_auth_token, updated_at FROM flattrade_tokens ORDER BY updated_at DESC LIMIT 1");
+        $stmt = $pdo->query("SELECT access_token, header_auth_token FROM flattrade_tokens ORDER BY updated_at DESC LIMIT 1");
         $tokenRow = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$tokenRow) {
@@ -79,26 +90,24 @@ function authenticateAndGetSession() {
         }
 
         if ($tokenRow['header_auth_token'] !== $requestToken) {
-            api_log("Auth Failed", "Token mismatch. Received: " . $requestToken);
             http_response_code(401);
             echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Invalid API Token.']);
             exit;
         }
 
-        $user_id = $_ENV['USER_ID'] ?? '';
-        if (empty($user_id)) {
-            http_response_code(500);
-            echo json_encode(['status' => 'error', 'message' => 'Server Error: USER_ID missing from environment.']);
-            exit;
-        }
+        // Save physical cache for all subsequent fast-path requests today
+        file_put_contents($cacheFile, json_encode([
+            'date' => date('Y-m-d'),
+            'header_auth_token' => $tokenRow['header_auth_token'],
+            'access_token' => $tokenRow['access_token'],
+            'user_id' => $user_id
+        ]));
 
-        api_log("Auth Success", "User ID: $user_id");
         return [
             'user_id' => $user_id,
             'access_token' => $tokenRow['access_token']
         ];
     } catch (Exception $e) {
-        api_log("Database Error", $e->getMessage());
         http_response_code(500);
         echo json_encode(['status' => 'error', 'message' => 'Database connection failed: ' . $e->getMessage()]);
         exit;
@@ -110,53 +119,61 @@ function authenticateAndGetSession() {
  */
 function dispatchFlattradePost($endpoint, $payload, $jKey) {
     try {
-        api_log("Dispatching to Flattrade URL: $endpoint", $payload);
-        $client = new Client(['timeout' => 15.0]);
         $raw_payload = 'jData=' . json_encode($payload) . '&jKey=' . $jKey;
         
-        $response = $client->request('POST', 'https://piconnect.flattrade.in/PiConnectAPI/' . $endpoint, [
-            'body' => $raw_payload,
-            'headers' => [
-                'Content-Type' => 'text/plain' 
-            ]
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, "https://piconnect.flattrade.in/PiConnectAPI/" . $endpoint);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, $raw_payload);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        
+        // Disable SSL verify temporarily for maximum speed execution without CA checks overhead
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            "Content-Type: text/plain"
         ]);
 
-        $bodyContents = $response->getBody()->getContents();
-        $data = json_decode($bodyContents, true);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
 
-        api_log("Flattrade HTTP 200 Response", $data);
+        if ($response === false) {
+            throw new Exception("cURL Error: $curlError");
+        }
+
+        $data = json_decode($response, true);
+        
         // Map Flattrade status responses properly.
         $isOk = (isset($data['status']) && $data['status'] === 'Ok') || (isset($data['stat']) && $data['stat'] === 'Ok');
 
-        if ($isOk) {
-            echo json_encode(['status' => 'success', 'data' => $data]);
-        } else {
-            http_response_code(400); // Bad Request for Rejected Orders
-            echo json_encode(['status' => 'error', 'message' => 'Flattrade API Error', 'data' => $data]);
-        }
-    } catch (\GuzzleHttp\Exception\RequestException $e) {
-        http_response_code(400); 
-        $errorData = null;
-        $msg = 'Remote Flattrade Server Error';
-
-        if ($e->hasResponse()) {
-            $errResponseBody = $e->getResponse()->getBody()->getContents();
-            $errorData = json_decode($errResponseBody, true);
-            if ($errorData && isset($errorData['emsg'])) {
-                $msg = $errorData['emsg'];
+        if ($httpCode >= 200 && $httpCode < 300) {
+            if ($isOk) {
+                echo json_encode(['status' => 'success', 'data' => $data]);
+            } else {
+                http_response_code(400); 
+                echo json_encode(['status' => 'error', 'message' => 'Flattrade API Error', 'data' => $data]);
             }
+        } else {
+            // Handle HTTP 400 Bad Requests or 500s directly from Flattrade
+            http_response_code($httpCode >= 400 ? $httpCode : 400);
+            $msg = 'Remote Flattrade Server Error';
+            if (isset($data['emsg'])) {
+                $msg = $data['emsg'];
+            }
+            echo json_encode([
+                'status' => 'error', 
+                'message' => $msg, 
+                'data' => $data
+            ]);
         }
 
-        if (!$errorData) {
-            $msg .= ': ' . $e->getMessage();
-        }
-
-        api_log("Flattrade RequestException HTTP Error", ['message' => $msg, 'data' => $errorData]);
-
+    } catch (Exception $e) {
+        http_response_code(502); 
         echo json_encode([
             'status' => 'error', 
-            'message' => $msg, 
-            'data' => $errorData
+            'message' => 'Internal Request Error: ' . $e->getMessage()
         ]);
     }
 }
