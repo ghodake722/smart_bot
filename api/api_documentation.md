@@ -19,7 +19,7 @@ This directory provides secure wrapper endpoints over Flattrade's `PiConnectAPI`
     "tsym": "ACC-EQ",
     "qty": "50",
     "prc": "1400",
-    "prd": "H",
+    "prd": "I",
     "trantype": "B",
     "prctyp": "LMT",
     "ret": "DAY"

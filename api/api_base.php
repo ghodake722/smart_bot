@@ -11,7 +11,8 @@ header('Content-Type: application/json');
  * Appends a debug step to php_debug.log
  */
 function api_log($step, $data = null) {
-    $logFile = dirname(__DIR__) . '/php_debug.log';
+    // Write directly inside the api/ folder to avoid server write-permission blocks on the root workspace
+    $logFile = __DIR__ . '/api_debug.log';
     $time = date('Y-m-d H:i:s');
     $logEntry = "[$time] STEP: $step\n";
     if ($data !== null) {
