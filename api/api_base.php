@@ -8,6 +8,20 @@ use GuzzleHttp\Client;
 header('Content-Type: application/json');
 
 /**
+ * Appends a debug step to php_debug.log
+ */
+function api_log($step, $data = null) {
+    $logFile = dirname(__DIR__) . '/php_debug.log';
+    $time = date('Y-m-d H:i:s');
+    $logEntry = "[$time] STEP: $step\n";
+    if ($data !== null) {
+        $logEntry .= "DATA: " . (is_string($data) ? $data : json_encode($data, JSON_PRETTY_PRINT)) . "\n";
+    }
+    $logEntry .= "----------------------------------------\n";
+    file_put_contents($logFile, $logEntry, FILE_APPEND);
+}
+
+/**
  * Validates the request method.
  * @param string $expectedMethod
  */
@@ -30,6 +44,7 @@ function authenticateAndGetSession() {
     $dotenv = Dotenv::createImmutable(dirname(__DIR__));
     $dotenv->safeLoad();
 
+    api_log("Starting Authentication Check", ["URI" => $_SERVER['REQUEST_URI'] ?? '', "Method" => $_SERVER['REQUEST_METHOD'] ?? '']);
     $headers = getallheaders();
     $requestToken = '';
 
@@ -42,6 +57,7 @@ function authenticateAndGetSession() {
     }
 
     if (empty($requestToken)) {
+        api_log("Auth Failed", "Missing Token Header");
         http_response_code(401);
         echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Missing API Token Header (Authorization or X-Auth-Token).']);
         exit;
@@ -62,6 +78,7 @@ function authenticateAndGetSession() {
         }
 
         if ($tokenRow['header_auth_token'] !== $requestToken) {
+            api_log("Auth Failed", "Token mismatch. Received: " . $requestToken);
             http_response_code(401);
             echo json_encode(['status' => 'error', 'message' => 'Unauthorized: Invalid API Token.']);
             exit;
@@ -74,11 +91,13 @@ function authenticateAndGetSession() {
             exit;
         }
 
+        api_log("Auth Success", "User ID: $user_id");
         return [
             'user_id' => $user_id,
             'access_token' => $tokenRow['access_token']
         ];
     } catch (Exception $e) {
+        api_log("Database Error", $e->getMessage());
         http_response_code(500);
         echo json_encode(['status' => 'error', 'message' => 'Database connection failed: ' . $e->getMessage()]);
         exit;
@@ -90,19 +109,21 @@ function authenticateAndGetSession() {
  */
 function dispatchFlattradePost($endpoint, $payload, $jKey) {
     try {
+        api_log("Dispatching to Flattrade URL: $endpoint", $payload);
         $client = new Client(['timeout' => 15.0]);
         $raw_payload = 'jData=' . json_encode($payload) . '&jKey=' . $jKey;
         
         $response = $client->request('POST', 'https://piconnect.flattrade.in/PiConnectAPI/' . $endpoint, [
             'body' => $raw_payload,
             'headers' => [
-                'Content-Type' => 'text/plain' // Flattrade PiConnect API expects this text/plain form-url mapped format.
+                'Content-Type' => 'text/plain' 
             ]
         ]);
 
         $bodyContents = $response->getBody()->getContents();
         $data = json_decode($bodyContents, true);
 
+        api_log("Flattrade HTTP 200 Response", $data);
         // Map Flattrade status responses properly.
         $isOk = (isset($data['status']) && $data['status'] === 'Ok') || (isset($data['stat']) && $data['stat'] === 'Ok');
 
@@ -128,6 +149,8 @@ function dispatchFlattradePost($endpoint, $payload, $jKey) {
         if (!$errorData) {
             $msg .= ': ' . $e->getMessage();
         }
+
+        api_log("Flattrade RequestException HTTP Error", ['message' => $msg, 'data' => $errorData]);
 
         echo json_encode([
             'status' => 'error', 
