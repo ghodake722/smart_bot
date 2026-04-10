@@ -285,7 +285,7 @@ try {
                       "timeout": 0,
                       "headers": {
                         "Content-Type": "application/json",
-                        "X-Auth-Token": "MY_API_TEST_TOKEN_123"
+                        "X-Auth-Token": "7b9d3e8a2f1c40b5d6e9f0a1c2b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1"
                       },
                       "data": JSON.stringify({
                         "exch": "NSE",
