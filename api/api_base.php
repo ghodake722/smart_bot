@@ -113,7 +113,26 @@ function dispatchFlattradePost($endpoint, $payload, $jKey) {
             echo json_encode(['status' => 'error', 'message' => 'Flattrade API Error', 'data' => $data]);
         }
     } catch (\GuzzleHttp\Exception\RequestException $e) {
-        http_response_code(502); // Bad Gateway
-        echo json_encode(['status' => 'error', 'message' => 'Remote Flattrade Server Error: ' . $e->getMessage()]);
+        http_response_code(400); 
+        $errorData = null;
+        $msg = 'Remote Flattrade Server Error';
+
+        if ($e->hasResponse()) {
+            $errResponseBody = $e->getResponse()->getBody()->getContents();
+            $errorData = json_decode($errResponseBody, true);
+            if ($errorData && isset($errorData['emsg'])) {
+                $msg = $errorData['emsg'];
+            }
+        }
+
+        if (!$errorData) {
+            $msg .= ': ' . $e->getMessage();
+        }
+
+        echo json_encode([
+            'status' => 'error', 
+            'message' => $msg, 
+            'data' => $errorData
+        ]);
     }
 }
