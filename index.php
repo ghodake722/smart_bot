@@ -182,8 +182,9 @@ try {
         @keyframes spin {
             to { transform: rotate(360deg); }
 
-        
     </style>
+    <!-- Core jQuery Engine -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body>
 
@@ -191,6 +192,7 @@ try {
     <div class="top-nav">
         <?php if ($hasFreshToken): ?>
             <button id="fetchMarginBtn" class="nav-btn">Fetch Margin</button>
+            <button id="placeOrderAjaxBtn" class="nav-btn">Place Order</button>
         <?php endif; ?>
         <a href="https://auth.flattrade.in/?app_key=<?= htmlspecialchars($api_key) ?>" class="nav-btn primary">Login with Flattrade</a>
     </div>
@@ -267,6 +269,66 @@ try {
                 });
             }
 
+            // jQuery AJAX Fast Implementation for Order Placement
+            const orderBtn = document.getElementById('placeOrderAjaxBtn');
+            if (orderBtn) {
+                $(orderBtn).on('click', function() {
+                    displayArea.style.display = 'none';
+                    loader.style.display = 'block';
+
+                    // Capture High-Resolution Performance Timestamp Before Send
+                    const startTime = performance.now(); 
+
+                    var settings = {
+                      "url": "api/place_order.php",
+                      "method": "POST",
+                      "timeout": 0,
+                      "headers": {
+                        "Content-Type": "application/json",
+                        "X-Auth-Token": "MY_API_TEST_TOKEN_123"
+                      },
+                      "data": JSON.stringify({
+                        "exch": "NSE",
+                        "tsym": "ACC-EQ",
+                        "qty": "50",
+                        "prc": "1400",
+                        "prd": "I",
+                        "trantype": "B",
+                        "prctyp": "LMT",
+                        "ret": "DAY"
+                      })
+                    };
+
+                    $.ajax(settings)
+                      .done(function (response) {
+                          // Capture High-Resolution Performance Timestamp Immediately after HTTP resolution
+                          const endTime = performance.now();
+                          const timeTakenMs = (endTime - startTime).toFixed(3);
+                          const timeTakenMicro = ((endTime - startTime) * 1000).toFixed(0);
+
+                          loader.style.display = 'none';
+                          displayArea.style.display = 'block';
+
+                          let html = `<h2 style="font-size:1.1rem; margin-bottom: 12px; color:var(--success-color);">Order Diagnostic Complete</h2>`;
+                          html += `<div style="background: rgba(255,255,255,0.03); padding: 16px; border-radius: 8px; margin-bottom: 16px; border-left: 4px solid var(--accent-color);">`;
+                          html += `<div><strong>Capture Start:</strong> ${startTime.toFixed(3)} ms</div>`;
+                          html += `<div><strong>Capture Return:</strong> ${endTime.toFixed(3)} ms</div>`;
+                          html += `<div><strong style="color:var(--accent-color); font-size:1.2rem;">Delta T: ${timeTakenMicro} Microseconds</strong> (${timeTakenMs} ms)</div>`;
+                          html += `</div>`;
+                          
+                          html += `<h3 style="font-size:0.9rem; margin-bottom:8px">API Payload:</h3>`;
+                          html += `<pre style="font-size:0.8rem; overflow-x:auto;">${JSON.stringify(response, null, 2)}</pre>`;
+
+                          displayArea.innerHTML = html;
+                          console.log("Order Debug Output:", response);
+                      })
+                      .fail(function(jqXHR, textStatus) {
+                          loader.style.display = 'none';
+                          displayArea.style.display = 'block';
+                          displayArea.innerHTML = `<span style="color: var(--error-color)">Request Failed: ${textStatus} <br><pre>${jqXHR.responseText}</pre></span>`;
+                      });
+                });
+            }
 
         });
     </script>
