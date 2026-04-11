@@ -1,22 +1,21 @@
 <?php
-require_once __DIR__ . '/api_base.php';
+/**
+ * Legacy Place Order Endpoint (synchronous mode)
+ * For the async/early-response pipeline, use signal_router.php instead.
+ */
+require_once __DIR__ . '/engine.php';
 
-enforceMethod('POST');
-$session = authenticateAndGetSession();
+ft_enforce_method('POST');
+$session = ft_authenticate(ft_extract_bearer());
 
-// Get the raw POST body
-$inputRaw = file_get_contents("php://input");
-$inputData = json_decode($inputRaw, true);
-
-if (!$inputData) {
+$input = json_decode(file_get_contents('php://input'), true);
+if (!$input) {
     http_response_code(400);
-    echo json_encode(['status' => 'error', 'message' => 'Invalid or missing JSON body.']);
+    echo '{"s":"error","m":"Invalid or missing JSON body"}';
     exit;
 }
 
-// Set required basic elements globally
-$inputData['uid'] = $session['user_id'];
-$inputData['actid'] = $session['user_id'];
+$input['uid']   = $session['client_id'];
+$input['actid'] = $session['client_id'];
 
-// Forward the POST request to Flattrade PlaceOrder endpoint
-dispatchFlattradePost('PlaceOrder', $inputData, $session['access_token']);
+ft_dispatch('PlaceOrder', $input, $session['access_token'], true);

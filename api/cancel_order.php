@@ -1,27 +1,29 @@
 <?php
-require_once __DIR__ . '/api_base.php';
+/**
+ * Legacy Cancel Order Endpoint (synchronous mode)
+ * For the async/early-response pipeline, use signal_router.php instead.
+ */
+require_once __DIR__ . '/engine.php';
 
-enforceMethod('DELETE');
-$session = authenticateAndGetSession();
+ft_enforce_method('DELETE');
+$session = ft_authenticate(ft_extract_bearer());
 
-$inputRaw = file_get_contents("php://input");
-$inputData = json_decode($inputRaw, true);
+$input = json_decode(file_get_contents('php://input'), true);
 
-// For DELETE, some clients use URL params, others use JSON. Check both.
-if (!$inputData && isset($_GET['norenordno'])) {
-    $inputData = ['norenordno' => $_GET['norenordno']];
+// Support DELETE with query param fallback
+if (!$input && isset($_GET['norenordno'])) {
+    $input = ['norenordno' => $_GET['norenordno']];
 }
 
-if (!$inputData || !isset($inputData['norenordno'])) {
+if (!$input || empty($input['norenordno'])) {
     http_response_code(400);
-    echo json_encode(['status' => 'error', 'message' => 'Missing norenordno for cancellation. Send JSON body or ?norenordno=... in URL.']);
+    echo '{"s":"error","m":"Missing norenordno for cancellation"}';
     exit;
 }
 
-// CancelOrder primarily uses uid and norenordno
 $payload = [
-    'uid' => $session['user_id'],
-    'norenordno' => $inputData['norenordno']
+    'uid'        => $session['client_id'],
+    'norenordno' => $input['norenordno'],
 ];
 
-dispatchFlattradePost('CancelOrder', $payload, $session['access_token']);
+ft_dispatch('CancelOrder', $payload, $session['access_token'], true);
