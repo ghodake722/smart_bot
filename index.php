@@ -1,41 +1,30 @@
 <?php
-date_default_timezone_set("Asia/Kolkata");
-// Load composer dependencies
-require_once __DIR__ . '/vendor/autoload.php';
+declare(strict_types=1);
+date_default_timezone_set('Asia/Kolkata');
 
-use Dotenv\Dotenv;
+// Hardcoded — no Dotenv, no autoloader overhead
+$api_key = '2e42645836894d0f8bb71f02f2903b39';
+$db_host = 'localhost';
+$db_name = 'mytptd_c1_db';
+$db_user = 'mytptd_c1_root';
+$db_pass = 'ptP_*yOV?7QM';
+
+$hasFreshToken = false;
 
 try {
-    // 1. Bootstrap .env
-    $dotenv = Dotenv::createImmutable(__DIR__);
-    $dotenv->load();
-
-    $api_key = $_ENV['FLATTRADE_API_KEY'] ?? $_ENV['API_KEY'] ?? '';
-
-    if (empty($api_key)) {
-        throw new Exception("Missing FLATTRADE API credentials in the .env file.");
-    }
-
-    // Check for a freshly generated token today
-    $hasFreshToken = false;
-    $dsn = "mysql:host=" . ($_ENV['DB_HOST'] ?? 'localhost') . ";dbname=" . ($_ENV['DB_NAME'] ?? '') . ";charset=utf8mb4";
-    $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '');
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-    $stmt = $pdo->query("SELECT updated_at FROM flattrade_tokens ORDER BY updated_at DESC LIMIT 1");
-    $token = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    if ($token && !empty($token['updated_at'])) {
-        $updatedDate = date('Y-m-d', strtotime($token['updated_at']));
-        $currentDate = date('Y-m-d');
-        if ($updatedDate === $currentDate) {
-            $hasFreshToken = true;
-        }
-    }
-
+    $pdo = new PDO(
+        "mysql:host={$db_host};dbname={$db_name};charset=utf8mb4",
+        $db_user, $db_pass,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+    );
+    $stmt = $pdo->query(
+        "SELECT updated_at FROM flattrade_tokens
+         WHERE DATE(updated_at) = CURDATE()
+         ORDER BY updated_at DESC LIMIT 1"
+    );
+    $hasFreshToken = (bool)$stmt->fetch(PDO::FETCH_ASSOC);
 } catch (Exception $e) {
-    echo "<h1>Critical Error</h1><p>" . htmlspecialchars($e->getMessage()) . "</p>";
-    exit;
+    // Silent — dashboard still renders, just without trading buttons
 }
 ?>
 <!DOCTYPE html>
@@ -72,8 +61,6 @@ try {
             justify-content: center;
             background-image: radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 400px);
         }
-        
-        /* Top Navigation Area */
         .top-nav {
             position: absolute;
             top: 20px;
@@ -82,7 +69,6 @@ try {
             gap: 12px;
             align-items: center;
         }
-
         .nav-btn {
             display: inline-block;
             padding: 10px 20px;
@@ -108,7 +94,6 @@ try {
         .nav-btn.primary:hover {
             background-color: var(--accent-hover);
         }
-
         .container {
             background: var(--container-bg);
             backdrop-filter: blur(16px);
@@ -132,13 +117,11 @@ try {
             font-size: 0.875rem;
             margin-bottom: 24px;
         }
-
-        /* Messaging Boxes */
         .msg-box {
             margin-bottom: 24px;
             padding: 20px;
             border-radius: 12px;
-            display: none; /* dynamically shown */
+            display: none;
         }
         .msg-box.success {
             display: block;
@@ -152,8 +135,6 @@ try {
             border: 1px solid var(--error-color);
             color: var(--error-color);
         }
-
-        /* Margin Display Area */
         #margin-display {
             display: none;
             margin-top: 24px;
@@ -162,12 +143,6 @@ try {
             border-radius: 12px;
             padding: 24px;
             text-align: left;
-        }
-        #margin-display pre {
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            font-size: 0.85rem;
-            color: var(--text-secondary);
         }
         .spinner {
             display: none;
@@ -181,33 +156,26 @@ try {
         }
         @keyframes spin {
             to { transform: rotate(360deg); }
-
+        }
     </style>
-    <!-- Core jQuery Engine -->
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body>
-
-    <!-- Top Navigation with conditional Fetch Margin -->
     <div class="top-nav">
         <?php if ($hasFreshToken): ?>
             <button id="fetchMarginBtn" class="nav-btn">Fetch Margin</button>
-            <button id="placeOrderAjaxBtn" class="nav-btn">Place Order</button>
+            <button id="placeOrderBtn" class="nav-btn">Place Order</button>
         <?php endif; ?>
         <a href="https://auth.flattrade.in/?app_key=<?= htmlspecialchars($api_key) ?>" class="nav-btn primary">Login with Flattrade</a>
     </div>
 
-    <!-- Main Dashboard -->
     <div class="container">
         <h1>Flattrade OAuth Dashboard</h1>
         <p class="subtitle">Secure API Integration Engine</p>
 
-
-
         <?php if (isset($_GET['success']) && $_GET['success'] == '1'): ?>
             <div class="msg-box success">
                 <strong>Authentication Successful!</strong><br>
-                The Access Token for today has been safely stored in your database. You can now fetch your margin limits.
+                The Access Token for today has been safely stored. You can now fetch your margin limits.
             </div>
         <?php endif; ?>
 
@@ -218,120 +186,88 @@ try {
             </div>
         <?php endif; ?>
 
-        <!-- Loading spinner for API tasks -->
         <div id="loader" class="spinner"></div>
-
-        <!-- Margin Response JSON displays here -->
         <div id="margin-display"></div>
-
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const fetchBtn = document.getElementById('fetchMarginBtn');
             const displayArea = document.getElementById('margin-display');
             const loader = document.getElementById('loader');
 
+            const fetchBtn = document.getElementById('fetchMarginBtn');
             if (fetchBtn) {
                 fetchBtn.addEventListener('click', async () => {
                     displayArea.style.display = 'none';
                     loader.style.display = 'block';
-
                     try {
-                        const response = await fetch('fetch_margin.php');
-                        const data = await response.json();
-                        
+                        const res = await fetch('fetch_margin.php');
+                        const data = await res.json();
                         loader.style.display = 'none';
                         displayArea.style.display = 'block';
-
                         if (data.status === 'error') {
-                            displayArea.innerHTML = `<span style="color: var(--error-color)">Error: ${data.message}</span>`;
+                            displayArea.innerHTML = `<span style="color:var(--error-color)">Error: ${data.message}</span>`;
                         } else {
-                            const limits = data.payload;
-                            let html = `<h2 style="font-size:1.1rem; margin-bottom: 12px; color:var(--text-primary);">Margin Limits (IST)</h2>`;
-                            html += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; font-size: 0.9rem;">`;
-                            html += `<div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px;">`;
-                            html += `<span style="color:var(--text-secondary)">Available Cash</span><br><strong style="font-size:1.1rem; color:var(--success-color)">₹${limits.cash || '0.00'}</strong></div>`;
-                            html += `<div style="background: rgba(255,255,255,0.03); padding: 12px; border-radius: 8px;">`;
-                            html += `<span style="color:var(--text-secondary)">Margin Used</span><br><strong style="font-size:1.1rem; color:var(--error-color)">₹${limits.marginused || '0.00'}</strong></div>`;
-                            html += `<div><span style="color:var(--text-secondary)">Payin:</span> <strong style="float:right">₹${limits.payin || '0.00'}</strong></div>`;
-                            html += `<div><span style="color:var(--text-secondary)">Payout:</span> <strong style="float:right">₹${limits.payout || '0.00'}</strong></div>`;
-                            html += `<div><span style="color:var(--text-secondary)">Gross Exposure:</span> <strong style="float:right">₹${limits.grexpo || '0.00'}</strong></div>`;
-                            html += `<div><span style="color:var(--text-secondary)">M2M (urmtom):</span> <strong style="float:right">₹${limits.urmtom || '0.00'}</strong></div>`;
-                            html += `</div>`;
-                            displayArea.innerHTML = html;
+                            const l = data.payload;
+                            displayArea.innerHTML = `
+                                <h2 style="font-size:1.1rem;margin-bottom:12px;color:var(--text-primary)">Margin Limits (IST)</h2>
+                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:0.9rem">
+                                    <div style="background:rgba(255,255,255,0.03);padding:12px;border-radius:8px">
+                                        <span style="color:var(--text-secondary)">Available Cash</span><br>
+                                        <strong style="font-size:1.1rem;color:var(--success-color)">₹${l.cash||'0.00'}</strong>
+                                    </div>
+                                    <div style="background:rgba(255,255,255,0.03);padding:12px;border-radius:8px">
+                                        <span style="color:var(--text-secondary)">Margin Used</span><br>
+                                        <strong style="font-size:1.1rem;color:var(--error-color)">₹${l.marginused||'0.00'}</strong>
+                                    </div>
+                                    <div><span style="color:var(--text-secondary)">Payin:</span> <strong style="float:right">₹${l.payin||'0.00'}</strong></div>
+                                    <div><span style="color:var(--text-secondary)">Payout:</span> <strong style="float:right">₹${l.payout||'0.00'}</strong></div>
+                                    <div><span style="color:var(--text-secondary)">Gross Exposure:</span> <strong style="float:right">₹${l.grexpo||'0.00'}</strong></div>
+                                    <div><span style="color:var(--text-secondary)">M2M:</span> <strong style="float:right">₹${l.urmtom||'0.00'}</strong></div>
+                                </div>`;
                         }
-                    } catch (e) {
+                    } catch {
                         loader.style.display = 'none';
                         displayArea.style.display = 'block';
-                        displayArea.innerHTML = `<span style="color: var(--error-color)">Network Error: Could not connect to fetch_margin.php</span>`;
+                        displayArea.innerHTML = `<span style="color:var(--error-color)">Network Error: Could not reach server</span>`;
                     }
                 });
             }
 
-            // jQuery AJAX Fast Implementation for Order Placement
-            const orderBtn = document.getElementById('placeOrderAjaxBtn');
+            const orderBtn = document.getElementById('placeOrderBtn');
             if (orderBtn) {
-                $(orderBtn).on('click', function() {
+                orderBtn.addEventListener('click', async () => {
                     displayArea.style.display = 'none';
                     loader.style.display = 'block';
-
-                    // Capture High-Resolution Performance Timestamp Before Send
-                    const startTime = performance.now(); 
-
-                    var settings = {
-                      "url": "api/place_order.php",
-                      "method": "POST",
-                      "timeout": 0,
-                      "headers": {
-                        "Content-Type": "application/json",
-                        "X-Auth-Token": "7b9d3e8a2f1c40b5d6e9f0a1c2b3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1"
-                      },
-                      "data": JSON.stringify({
-                        "exch": "NSE",
-                        "tsym": "ACC-EQ",
-                        "qty": "50",
-                        "prc": "1400",
-                        "prd": "I",
-                        "trantype": "B",
-                        "prctyp": "LMT",
-                        "ret": "DAY"
-                      })
-                    };
-
-                    $.ajax(settings)
-                      .done(function (response) {
-                          // Capture High-Resolution Performance Timestamp Immediately after HTTP resolution
-                          const endTime = performance.now();
-                          const timeTakenMs = (endTime - startTime).toFixed(3);
-                          const timeTakenMicro = ((endTime - startTime) * 1000).toFixed(0);
-
-                          loader.style.display = 'none';
-                          displayArea.style.display = 'block';
-
-                          let html = `<h2 style="font-size:1.1rem; margin-bottom: 12px; color:var(--success-color);">Order Diagnostic Complete</h2>`;
-                          html += `<div style="background: rgba(255,255,255,0.03); padding: 16px; border-radius: 8px; margin-bottom: 16px; border-left: 4px solid var(--accent-color);">`;
-                          html += `<div><strong>Capture Start:</strong> ${startTime.toFixed(3)} ms</div>`;
-                          html += `<div><strong>Capture Return:</strong> ${endTime.toFixed(3)} ms</div>`;
-                          html += `<div><strong style="color:var(--accent-color); font-size:1.2rem;">Delta T: ${timeTakenMicro} Microseconds</strong> (${timeTakenMs} ms)</div>`;
-                          html += `</div>`;
-                          
-                          html += `<h3 style="font-size:0.9rem; margin-bottom:8px">API Payload:</h3>`;
-                          html += `<pre style="font-size:0.8rem; overflow-x:auto;">${JSON.stringify(response, null, 2)}</pre>`;
-
-                          displayArea.innerHTML = html;
-                          console.log("Order Debug Output:", response);
-                      })
-                      .fail(function(jqXHR, textStatus) {
-                          loader.style.display = 'none';
-                          displayArea.style.display = 'block';
-                          displayArea.innerHTML = `<span style="color: var(--error-color)">Request Failed: ${textStatus} <br><pre>${jqXHR.responseText}</pre></span>`;
-                      });
+                    const t0 = performance.now();
+                    try {
+                        const res = await fetch('api/signal_router.php', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer __REPLACE_WITH_LIVE_TOKEN__' },
+                            body: JSON.stringify({
+                                action: 'place', exch: 'NSE', tsym: 'ACC-EQ', qty: '1',
+                                prc: '1400', prd: 'I', trantype: 'B', prctyp: 'LMT', ret: 'DAY'
+                            })
+                        });
+                        const data = await res.json();
+                        const dt = performance.now() - t0;
+                        loader.style.display = 'none';
+                        displayArea.style.display = 'block';
+                        displayArea.innerHTML = `
+                            <h2 style="font-size:1.1rem;margin-bottom:12px;color:var(--success-color)">Signal Dispatched</h2>
+                            <div style="background:rgba(255,255,255,0.03);padding:16px;border-radius:8px;margin-bottom:16px;border-left:4px solid var(--accent-color)">
+                                <div><strong style="color:var(--accent-color);font-size:1.2rem">Round-trip: ${dt.toFixed(1)} ms</strong></div>
+                                <div>Request ID: <code>${data.request_id||'N/A'}</code></div>
+                            </div>
+                            <pre style="font-size:0.8rem;overflow-x:auto;color:var(--text-secondary)">${JSON.stringify(data,null,2)}</pre>`;
+                    } catch {
+                        loader.style.display = 'none';
+                        displayArea.style.display = 'block';
+                        displayArea.innerHTML = `<span style="color:var(--error-color)">Request Failed</span>`;
+                    }
                 });
             }
-
         });
     </script>
-
 </body>
 </html>

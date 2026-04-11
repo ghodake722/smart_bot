@@ -1,77 +1,34 @@
 <?php
-date_default_timezone_set("Asia/Kolkata");
-require_once __DIR__ . '/vendor/autoload.php';
+/**
+ * Fetch Margin Limits — uses engine.php connection pools
+ * Called via AJAX from the dashboard (no Bearer auth required — internal only)
+ */
 
-use Dotenv\Dotenv;
-use GuzzleHttp\Client;
-
-header('Content-Type: application/json');
+declare(strict_types=1);
+require_once __DIR__ . '/api/engine.php';
 
 try {
-    // 1. Load Environment Variables
-    $dotenv = Dotenv::createImmutable(__DIR__);
-    $dotenv->load();
+    $pdo  = DbPool::get();
+    $stmt = $pdo->prepare(
+        'SELECT access_token FROM flattrade_tokens
+         WHERE DATE(updated_at) = CURDATE()
+         ORDER BY updated_at DESC LIMIT 1'
+    );
+    $stmt->execute();
+    $row = $stmt->fetch();
 
-    $user_id = $_ENV['USER_ID'] ?? '';
-    if (empty($user_id)) {
-        throw new Exception("USER_ID is missing from the .env configuration.");
+    if (!$row) {
+        throw new Exception('No active session token. Please login with Flattrade.');
     }
 
-    // 2. Fetch the Active Token
-    $dsn = "mysql:host=" . ($_ENV['DB_HOST'] ?? 'localhost') . ";dbname=" . ($_ENV['DB_NAME'] ?? '') . ";charset=utf8mb4";
-    $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '');
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $payload = ['uid' => FT_USER_ID, 'actid' => FT_USER_ID];
+    $result  = ft_dispatch('Limits', $payload, $row['access_token'], false);
 
-    $stmt = $pdo->query("SELECT access_token, updated_at FROM flattrade_tokens ORDER BY updated_at DESC LIMIT 1");
-    $tokenRow = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$tokenRow || empty($tokenRow['access_token'])) {
-        throw new Exception("No active session token found in the database. Please Login with Flattrade.");
+    if ($result['s'] === 'success') {
+        echo json_encode(['status' => 'success', 'payload' => $result['data']]);
+    } else {
+        echo json_encode(['status' => 'error', 'message' => $result['m']]);
     }
-
-    $updatedDate = date('Y-m-d', strtotime($tokenRow['updated_at']));
-    $currentDate = date('Y-m-d');
-    if ($updatedDate !== $currentDate) {
-        throw new Exception("Token is expired (not generated today). Please generate a new session.");
-    }
-
-    $access_token = $tokenRow['access_token'];
-
-    // 3. Request Margin Limits from Flattrade
-    // Flattrade generally accepts form_params with jData and jKey for PiConnect endpoints
-    $client = new Client(['timeout'  => 15.0]);
-    $payload = [
-        'uid' => $user_id,
-        'actid' => $user_id
-    ];
-
-    $raw_payload = 'jData=' . json_encode($payload) . '&jKey=' . $access_token;
-    $response = $client->request('POST', 'https://piconnect.flattrade.in/PiConnectAPI/Limits', [
-        'body' => $raw_payload,
-        'headers' => [
-            'Content-Type' => 'text/plain'
-        ]
-    ]);
-
-    $bodyContents = $response->getBody()->getContents();
-    $data = json_decode($bodyContents, true);
-
-    // Some Flattrade API versions return 'stat' instead of 'status'
-    $isOk = (isset($data['status']) && $data['status'] === 'Ok') || (isset($data['stat']) && $data['stat'] === 'Ok');
-
-    if (!$isOk) {
-        $errorDetail = !empty($data['emsg']) ? $data['emsg'] : "Unknown API rejection.";
-        throw new Exception("Flattrade Rejected Limit Query: " . $errorDetail);
-    }
-
-    echo json_encode([
-        'status' => 'success',
-        'payload' => $data
-    ]);
-
 } catch (Exception $e) {
-    echo json_encode([
-        'status' => 'error',
-        'message' => $e->getMessage()
-    ]);
+    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
 }

@@ -1,92 +1,87 @@
 <?php
-// Load composer dependencies
-require_once __DIR__ . '/vendor/autoload.php';
+/**
+ * OAuth Callback — Flattrade token exchange
+ * Redirect target: receives ?code=... from Flattrade, exchanges for access_token
+ * Runs once/day — not on critical trading path, but still optimized
+ */
 
-use Dotenv\Dotenv;
-use GuzzleHttp\Client;
-use GuzzleHttp\Exception\RequestException;
+declare(strict_types=1);
+date_default_timezone_set('Asia/Kolkata');
 
-// Initialize state
-$authStatus = null;
-$errorMsg = null;
-$client_id = null;
+// Hardcoded credentials (no Dotenv overhead)
+$api_key    = '2e42645836894d0f8bb71f02f2903b39';
+$api_secret = '2026.9d216d1a0b864d6da6df088e346ebb718dcd036c8b676a10';
+$db_host    = 'localhost';
+$db_name    = 'mytptd_c1_db';
+$db_user    = 'mytptd_c1_root';
+$db_pass    = 'ptP_*yOV?7QM';
 
 try {
-    // 1. Bootstrap .env
-    $dotenv = Dotenv::createImmutable(__DIR__);
-    $dotenv->load();
-
-    $api_key = $_ENV['FLATTRADE_API_KEY'] ?? $_ENV['API_KEY'] ?? '';
-    $raw_api_secret = $_ENV['FLATTRADE_API_SECRET'] ?? $_ENV['API_SECRET'] ?? '';
-
-    if (empty($api_key) || empty($raw_api_secret)) {
-        throw new Exception("Missing FLATTRADE API credentials in the .env file.");
-    }
-
-    // 2. Check if we are returning from Flattrade OAuth (Phase 2)
-    // Flattrade appends `?code=...&client=...` upon redirect.
-    if (isset($_GET['code']) && !empty($_GET['code'])) {
-        $request_code = trim($_GET['code']);
-        
-        // Connect to Database
-        $dsn = "mysql:host=" . ($_ENV['DB_HOST'] ?? 'localhost') . ";dbname=" . ($_ENV['DB_NAME'] ?? '') . ";charset=utf8mb4";
-        $pdo = new PDO($dsn, $_ENV['DB_USER'] ?? '', $_ENV['DB_PASS'] ?? '');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-        // Compute the secure hash purely in the backend as mandated 
-        $hash_string = $api_key . $request_code . $raw_api_secret;
-        $api_secret_hash = hash('sha256', $hash_string);
-
-        // Exchange for token
-        $client = new Client(['timeout'  => 15.0]);
-        $response = $client->request('POST', 'https://authapi.flattrade.in/trade/apitoken', [
-            'json' => [
-                'api_key'      => $api_key,
-                'request_code' => $request_code,
-                'api_secret'   => $api_secret_hash 
-            ]
-        ]);
-
-        $bodyContents = $response->getBody()->getContents();
-        $data = json_decode($bodyContents, true);
-
-        // Flattrade API inconsistently returns 'stat' or 'status'
-        $isOk = (isset($data['status']) && $data['status'] === 'Ok') || (isset($data['stat']) && $data['stat'] === 'Ok');
-
-        if (!$isOk) {
-            $errorDetail = !empty($data['emsg']) ? $data['emsg'] : "Unknown API rejection.";
-            throw new Exception("API Rejected Exchange. Detail: " . $errorDetail . " | Full Payload: " . $bodyContents);
-        }
-
-        $client_id = $data['client'] ?? '';
-        $access_token = $data['token'] ?? '';
-
-        if (empty($client_id) || empty($access_token)) {
-            throw new Exception("Flattrade API returned 'Ok' but payload lacked client_id or token. Payload: " . $bodyContents);
-        }
-
-        // Store the token safely
-        $sql = "INSERT INTO flattrade_tokens (client_id, access_token) 
-                VALUES (:client_id, :access_token) 
-                ON DUPLICATE KEY UPDATE 
-                access_token = VALUES(access_token),
-                updated_at = CURRENT_TIMESTAMP";
-                
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([
-            ':client_id' => $client_id,
-            ':access_token' => $access_token
-        ]);
-
-        header("Location: index.php?success=1");
-        exit;
-    } else {
-        // If someone visits redirect.php directly without a code, send them back to index.php
-        header("Location: index.php");
+    if (!isset($_GET['code']) || empty($_GET['code'])) {
+        header('Location: index.php');
         exit;
     }
+
+    $request_code    = trim($_GET['code']);
+    $api_secret_hash = hash('sha256', $api_key . $request_code . $api_secret);
+
+    // Exchange token via native cURL
+    $ch = curl_init('https://authapi.flattrade.in/trade/apitoken');
+    $post_body = json_encode([
+        'api_key'      => $api_key,
+        'request_code' => $request_code,
+        'api_secret'   => $api_secret_hash,
+    ]);
+    curl_setopt_array($ch, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $post_body,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 10,
+        CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+    ]);
+
+    $response = curl_exec($ch);
+    if ($response === false) {
+        throw new Exception('cURL Error: ' . curl_error($ch));
+    }
+    curl_close($ch);
+
+    $data = json_decode($response, true);
+    $isOk = ($data['stat'] ?? $data['status'] ?? '') === 'Ok';
+
+    if (!$isOk) {
+        throw new Exception('API Rejected: ' . ($data['emsg'] ?? 'Unknown error'));
+    }
+
+    $client_id    = $data['client'] ?? '';
+    $access_token = $data['token'] ?? '';
+
+    if (empty($client_id) || empty($access_token)) {
+        throw new Exception('API returned Ok but missing client/token fields');
+    }
+
+    // Persist to MySQL
+    $pdo = new PDO(
+        "mysql:host={$db_host};dbname={$db_name};charset=utf8mb4",
+        $db_user, $db_pass,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+    );
+
+    $stmt = $pdo->prepare(
+        'INSERT INTO flattrade_tokens (client_id, access_token)
+         VALUES (:cid, :tok)
+         ON DUPLICATE KEY UPDATE
+         access_token = VALUES(access_token),
+         updated_at = CURRENT_TIMESTAMP'
+    );
+    $stmt->execute([':cid' => $client_id, ':tok' => $access_token]);
+
+    header('Location: index.php?success=1');
+    exit;
+
 } catch (Exception $e) {
-    header("Location: index.php?error=" . urlencode($e->getMessage()));
+    header('Location: index.php?error=' . urlencode($e->getMessage()));
     exit;
 }
-?>
