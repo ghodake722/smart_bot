@@ -40,7 +40,7 @@ function ft_audit_log(string $event, string $message, string $source = 'redis', 
             ':src' => $source,
             ':ttl' => $ttl,
         ]);
-    } catch (PDOException) {
+    } catch (\Throwable) {
         // Silent — audit must never block the trading path
     }
 }
@@ -52,7 +52,8 @@ function ft_audit_log(string $event, string $message, string $source = 'redis', 
 function ft_resolve_session_token(): string
 {
     $redis_key = 'ft_session_token:' . FT_USER_ID;
-    $redis     = RedisPool::get();
+    $redis     = null;
+    try { $redis = RedisPool::get(); } catch (\Throwable) {}
 
     // ─ L1: Redis Cache ──────────────────────────────────────────────────────
     if ($redis !== null) {
