@@ -19,8 +19,88 @@ define('FT_REDIS_PORT', 6379);
 define('FT_REDIS_TTL',  86400);
 define('FT_BROKER_BASE', 'https://piconnect.flattrade.in/PiConnectAPI/');
 define('FT_CURL_TIMEOUT_MS', 500);
+define('FT_TOKEN_TTL',      3600);       // 1 hour — Redis session token TTL
 
 $_ENGINE_T0 = hrtime(true);
+
+
+// ── Audit Logger (fire-and-forget, never blocks hot path) ────────────────────
+function ft_audit_log(string $event, string $message, string $source = 'redis', ?int $ttl = null): void
+{
+    try {
+        $pdo  = DbPool::get();
+        $stmt = $pdo->prepare(
+            'INSERT INTO ft_token_audit_log (event_type, message, client_id, source, ttl_remaining)
+             VALUES (:ev, :msg, :cid, :src, :ttl)'
+        );
+        $stmt->execute([
+            ':ev'  => $event,
+            ':msg' => $message,
+            ':cid' => FT_USER_ID,
+            ':src' => $source,
+            ':ttl' => $ttl,
+        ]);
+    } catch (PDOException) {
+        // Silent — audit must never block the trading path
+    }
+}
+
+
+// ── Session Token Resolver (Redis L1 → MySQL L2 → Write-Back) ───────────────
+//    Returns the Flattrade access_token with a 1-hour Redis TTL refresh cycle.
+//    Every fetch/hit/miss/error is audit-logged for traceability.
+function ft_resolve_session_token(): string
+{
+    $redis_key = 'ft_session_token:' . FT_USER_ID;
+    $redis     = RedisPool::get();
+
+    // ─ L1: Redis Cache ──────────────────────────────────────────────────────
+    if ($redis !== null) {
+        try {
+            $cached = $redis->get($redis_key);
+            if ($cached !== false) {
+                $ttl = $redis->ttl($redis_key);
+                ft_audit_log('TOKEN_HIT', 'Redis cache hit — serving cached token', 'redis', ($ttl > 0 ? $ttl : null));
+                return $cached;
+            }
+            // Key absent or expired — fall through to MySQL
+            ft_audit_log('TOKEN_MISS', 'Redis key expired or absent — falling back to MySQL', 'redis');
+        } catch (RedisException) {
+            ft_audit_log('TOKEN_ERROR', 'Redis read failed — falling back to MySQL', 'redis');
+        }
+    }
+
+    // ─ L2: MySQL Fallback ───────────────────────────────────────────────────
+    $pdo  = DbPool::get();
+    $stmt = $pdo->prepare(
+        'SELECT access_token FROM flattrade_tokens
+         WHERE DATE(updated_at) = CURDATE()
+         ORDER BY updated_at DESC LIMIT 1'
+    );
+    $stmt->execute();
+    $row = $stmt->fetch();
+
+    if (!$row) {
+        ft_audit_log('TOKEN_ERROR', 'No active session token found in MySQL for today', 'mysql');
+        throw new Exception('No active session token. Please login with Flattrade.');
+    }
+
+    $token = $row['access_token'];
+
+    // ─ Write-Back to Redis with 1hr TTL ─────────────────────────────────────
+    if ($redis !== null) {
+        try {
+            $redis->setex($redis_key, FT_TOKEN_TTL, $token);
+            ft_audit_log('TOKEN_REFRESH', 'Token fetched from MySQL and cached in Redis (TTL: ' . FT_TOKEN_TTL . 's)', 'mysql', FT_TOKEN_TTL);
+        } catch (RedisException) {
+            ft_audit_log('TOKEN_REFRESH', 'Token fetched from MySQL — Redis write-back FAILED', 'fallback', null);
+        }
+    } else {
+        ft_audit_log('TOKEN_REFRESH', 'Token fetched from MySQL — Redis unavailable, no caching', 'fallback', null);
+    }
+
+    return $token;
+}
 
 
 // ── SINGLETON: Redis ─────────────────────────────────────────────────────────
@@ -137,27 +217,67 @@ function ft_extract_bearer(): string
 }
 
 
-// ── Cache-Aside Authentication (Redis L1 → MySQL L2 → Write-Back) ────────────
+// ── Fast Token Getter (zero-overhead, no validation) ─────────────────────────
+//    Reads the session token from Redis (populated by SearchScrip API).
+//    Minimal MySQL fallback — NO validation, NO TTL checks, NO audit logging.
+//    This ensures only SearchScrip owns the token lifecycle.
+function ft_fast_token(): string
+{
+    $redis = RedisPool::get();
+    if ($redis !== null) {
+        try {
+            $token = $redis->get('ft_session_token:' . FT_USER_ID);
+            if ($token !== false) return $token;
+        } catch (RedisException) {}
+    }
+
+    // Minimal MySQL fallback — no validation, no write-back, no logging
+    $pdo  = DbPool::get();
+    $stmt = $pdo->prepare(
+        'SELECT access_token FROM flattrade_tokens
+         WHERE DATE(updated_at) = CURDATE()
+         ORDER BY updated_at DESC LIMIT 1'
+    );
+    $stmt->execute();
+    $row = $stmt->fetch();
+
+    if (!$row) {
+        throw new Exception('No token available. Call SearchScrip API first to initialize.');
+    }
+
+    return $row['access_token'];
+}
+
+
+// ── Bearer Authentication (identity only — token via ft_fast_token) ──────────
+//    Validates the caller's bearer token against MySQL.
+//    Does NOT resolve or validate the Flattrade session token.
+//    Token resolution is delegated to ft_fast_token() → SearchScrip cache.
 function ft_authenticate(string $bearer_token): array
 {
     $cache_key = 'flattrade_auth:' . hash('sha1', $bearer_token);
 
-    // L1: Redis
+    // L1: Redis — cached identity only (client_id)
     $redis = RedisPool::get();
     if ($redis !== null) {
         try {
             $cached = $redis->get($cache_key);
             if ($cached !== false) {
                 $data = json_decode($cached, true);
-                if (isset($data['access_token'], $data['client_id'])) return $data;
+                if (isset($data['client_id'])) {
+                    return [
+                        'client_id'    => $data['client_id'],
+                        'access_token' => ft_fast_token(),
+                    ];
+                }
             }
         } catch (RedisException) {}
     }
 
-    // L2: MySQL
+    // L2: MySQL — validate bearer identity
     $pdo  = DbPool::get();
     $stmt = $pdo->prepare(
-        'SELECT client_id, access_token, header_auth_token
+        'SELECT client_id, header_auth_token
          FROM flattrade_tokens
          WHERE DATE(updated_at) = CURDATE()
          ORDER BY updated_at DESC
@@ -178,18 +298,17 @@ function ft_authenticate(string $bearer_token): array
         exit;
     }
 
-    $auth_payload = [
-        'client_id'    => $row['client_id'],
-        'access_token' => $row['access_token'],
-    ];
-
-    // Write-back to L1
+    // Cache identity only (NOT the access_token)
     if ($redis !== null) {
-        try { $redis->setex($cache_key, FT_REDIS_TTL, json_encode($auth_payload)); }
-        catch (RedisException) {}
+        try {
+            $redis->setex($cache_key, FT_REDIS_TTL, json_encode(['client_id' => $row['client_id']]));
+        } catch (RedisException) {}
     }
 
-    return $auth_payload;
+    return [
+        'client_id'    => $row['client_id'],
+        'access_token' => ft_fast_token(),
+    ];
 }
 
 
