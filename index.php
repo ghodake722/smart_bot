@@ -101,7 +101,7 @@ try {
             border-radius: 24px;
             padding: 40px;
             width: 100%;
-            max-width: 600px;
+            max-width: 720px;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
             text-align: center;
         }
@@ -116,6 +116,145 @@ try {
             color: var(--text-secondary);
             font-size: 0.875rem;
             margin-bottom: 24px;
+        }
+        /* ── Stock Search Section ───────────────────────────────── */
+        .search-section {
+            margin-bottom: 28px;
+            text-align: left;
+        }
+        .search-section h2 {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+        .search-row {
+            display: flex;
+            gap: 10px;
+        }
+        .search-row input[type="text"] {
+            flex: 1;
+            padding: 12px 16px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: rgba(255,255,255,0.06);
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .search-row input[type="text"]:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.25);
+        }
+        .search-row input[type="text"]::placeholder {
+            color: var(--text-secondary);
+            opacity: 0.6;
+        }
+        .search-row select {
+            padding: 12px 14px;
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+            background: rgba(255,255,255,0.06);
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            outline: none;
+            cursor: pointer;
+            min-width: 90px;
+        }
+        .search-row select option {
+            background: #1e293b;
+            color: #f8fafc;
+        }
+        .search-btn {
+            padding: 12px 24px;
+            border-radius: 10px;
+            border: none;
+            background: linear-gradient(135deg, var(--accent-color), #6366f1);
+            color: #fff;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.2s;
+            white-space: nowrap;
+        }
+        .search-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px rgba(59,130,246,0.35);
+        }
+        .search-btn:active {
+            transform: scale(0.97);
+        }
+        .search-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        /* ── Search Results ─────────────────────────────────────── */
+        #search-results {
+            margin-top: 16px;
+            display: none;
+            text-align: left;
+        }
+        #search-results .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        #search-results .results-header .latency {
+            font-family: 'Courier New', monospace;
+            color: var(--accent-color);
+        }
+        #search-results table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+        }
+        #search-results thead th {
+            padding: 10px 8px;
+            text-align: left;
+            color: var(--text-secondary);
+            font-weight: 600;
+            border-bottom: 1px solid var(--border-color);
+            text-transform: uppercase;
+            font-size: 0.72rem;
+            letter-spacing: 0.06em;
+        }
+        #search-results tbody tr {
+            transition: background 0.15s;
+        }
+        #search-results tbody tr:hover {
+            background: rgba(59,130,246,0.08);
+        }
+        #search-results tbody td {
+            padding: 9px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            color: var(--text-primary);
+        }
+        /* ── Error Display ──────────────────────────────────────── */
+        .search-error {
+            margin-top: 14px;
+            padding: 16px;
+            border-radius: 10px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--error-color);
+            color: var(--error-color);
+            font-size: 0.85rem;
+            text-align: left;
+            display: none;
+            word-break: break-word;
+        }
+        .search-error pre {
+            margin-top: 8px;
+            font-size: 0.78rem;
+            white-space: pre-wrap;
+            color: #fca5a5;
         }
         .msg-box {
             margin-bottom: 24px;
@@ -172,6 +311,26 @@ try {
         <h1>Flattrade OAuth Dashboard</h1>
         <p class="subtitle">Secure API Integration Engine</p>
 
+        <!-- ── Stock Search ────────────────────────────────────── -->
+        <div class="search-section">
+            <h2>🔍 Scrip Search</h2>
+            <div class="search-row">
+                <input type="text" id="searchInput" placeholder="e.g. NIFTY, BANKNIFTY, RELIANCE …" autocomplete="off" />
+                <select id="exchangeSelect">
+                    <option value="NFO" selected>NFO</option>
+                    <option value="NSE">NSE</option>
+                    <option value="BSE">BSE</option>
+                    <option value="BFO">BFO</option>
+                    <option value="CDS">CDS</option>
+                    <option value="MCX">MCX</option>
+                </select>
+                <button id="searchBtn" class="search-btn">Search</button>
+            </div>
+            <div id="search-error" class="search-error"></div>
+            <div id="search-results"></div>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--border-color);margin-bottom:24px;">
+
         <?php if (isset($_GET['success']) && $_GET['success'] == '1'): ?>
             <div class="msg-box success">
                 <strong>Authentication Successful!</strong><br>
@@ -195,6 +354,85 @@ try {
             const displayArea = document.getElementById('margin-display');
             const loader = document.getElementById('loader');
 
+            // ── Stock Search Handler ─────────────────────────────────────────
+            const searchInput   = document.getElementById('searchInput');
+            const exchangeSel   = document.getElementById('exchangeSelect');
+            const searchBtn     = document.getElementById('searchBtn');
+            const searchResults = document.getElementById('search-results');
+            const searchError   = document.getElementById('search-error');
+
+            async function executeSearch() {
+                const stext = searchInput.value.trim();
+                if (!stext) { searchInput.focus(); return; }
+
+                // Reset UI
+                searchResults.style.display = 'none';
+                searchError.style.display   = 'none';
+                searchBtn.disabled          = true;
+                searchBtn.textContent       = 'Searching…';
+
+                try {
+                    const res = await fetch('api/search_scrip.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ stext: stext, exch: exchangeSel.value })
+                    });
+
+                    const data = await res.json();
+
+                    if (data.s !== 'success') {
+                        // ── Show error clearly ──────────────────────────────
+                        searchError.style.display = 'block';
+                        searchError.innerHTML = `<strong>API Error (HTTP ${res.status})</strong>: ${data.m || 'Unknown error'}`
+                            + (data.debug ? `<pre>${data.debug}</pre>` : '')
+                            + `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                        return;
+                    }
+
+                    // ── Render results table ────────────────────────────────
+                    const items = data.payload?.values || data.payload || [];
+                    if (!Array.isArray(items) || items.length === 0) {
+                        searchResults.style.display = 'block';
+                        searchResults.innerHTML = `<div class="results-header"><span>No results for "<strong>${stext}</strong>"</span></div>`;
+                        return;
+                    }
+
+                    let html = `<div class="results-header">
+                        <span>${items.length} result${items.length > 1 ? 's' : ''} for "<strong>${stext}</strong>" on <strong>${exchangeSel.value}</strong></span>
+                        <span class="latency">${data.latency_us ? (data.latency_us / 1000).toFixed(1) + ' ms' : ''}</span>
+                    </div>`;
+                    html += `<table><thead><tr>
+                        <th>Trading Symbol</th><th>Exchange</th><th>Token</th><th>Instrument</th><th>Lot Size</th>
+                    </tr></thead><tbody>`;
+                    items.forEach(r => {
+                        html += `<tr>
+                            <td style="font-weight:600">${r.tsym || r.TradingSymbol || '—'}</td>
+                            <td>${r.exch || r.Exchange || '—'}</td>
+                            <td style="font-family:monospace;color:var(--accent-color)">${r.token || r.Token || '—'}</td>
+                            <td>${r.instname || r.Instrument || '—'}</td>
+                            <td>${r.ls || r.LotSize || '—'}</td>
+                        </tr>`;
+                    });
+                    html += `</tbody></table>`;
+
+                    searchResults.style.display = 'block';
+                    searchResults.innerHTML = html;
+
+                } catch (err) {
+                    searchError.style.display = 'block';
+                    searchError.innerHTML = `<strong>Network / JS Error</strong><pre>${err.message}\n${err.stack || ''}</pre>`;
+                } finally {
+                    searchBtn.disabled    = false;
+                    searchBtn.textContent = 'Search';
+                }
+            }
+
+            searchBtn.addEventListener('click', executeSearch);
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') executeSearch();
+            });
+
+            // ── Margin Fetch Handler ─────────────────────────────────────────
             const fetchBtn = document.getElementById('fetchMarginBtn');
             if (fetchBtn) {
                 fetchBtn.addEventListener('click', async () => {
@@ -234,6 +472,7 @@ try {
                 });
             }
 
+            // ── Place Order Handler ──────────────────────────────────────────
             const orderBtn = document.getElementById('placeOrderBtn');
             if (orderBtn) {
                 orderBtn.addEventListener('click', async () => {
