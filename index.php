@@ -24,13 +24,13 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
     $stmt = $pdo->query(
-        "SELECT updated_at FROM flattrade_tokens
-         WHERE DATE(updated_at) = CURDATE()
+        "SELECT id FROM flattrade_tokens 
+         WHERE DATE(updated_at) = CURDATE() 
          ORDER BY updated_at DESC LIMIT 1"
     );
     $hasFreshToken = (bool)$stmt->fetch(PDO::FETCH_ASSOC);
-} catch (Exception $e) {
-    // Silent — dashboard still renders, just without trading buttons
+} catch (PDOException $e) {
+    // Silent fail for UI simplicity
 }
 ?>
 <!DOCTYPE html>
@@ -39,268 +39,123 @@ try {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flattrade Session Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg-color: #0f172a;
             --container-bg: rgba(30, 41, 59, 0.7);
-            --border-color: rgba(255, 255, 255, 0.1);
+            --accent-color: #38bdf8;
+            --accent-hover: #0ea5e9;
             --text-primary: #f8fafc;
             --text-secondary: #94a3b8;
-            --accent-color: #3b82f6;
-            --accent-hover: #2563eb;
-            --success-color: #10b981;
+            --success-color: #22c55e;
             --error-color: #ef4444;
-            --margin-bg: rgba(59, 130, 246, 0.1);
+            --border-color: rgba(255, 255, 255, 0.1);
         }
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
-        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
+            font-family: 'Inter', sans-serif;
             background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at 0% 0%, rgba(56, 189, 248, 0.05) 0%, transparent 50%),
+                radial-gradient(circle at 100% 100%, rgba(56, 189, 248, 0.05) 0%, transparent 50%);
             color: var(--text-primary);
             min-height: 100vh;
             display: flex;
+            flex-direction: column;
             align-items: center;
             justify-content: center;
-            background-image: radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 400px);
+            padding: 20px;
         }
-        .top-nav {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            display: flex;
-            gap: 12px;
-            align-items: center;
-        }
-        .nav-btn {
-            display: inline-block;
-            padding: 10px 20px;
-            border-radius: 8px;
-            background-color: rgba(255, 255, 255, 0.1);
-            color: white;
-            text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            border: 1px solid var(--border-color);
-            transition: all 0.2s;
-            outline: none;
-        }
-        .nav-btn:hover {
-            background-color: rgba(255, 255, 255, 0.2);
-            transform: translateY(-1px);
-        }
-        .nav-btn.primary {
-            background-color: var(--accent-color);
-            border-color: var(--accent-color);
-        }
-        .nav-btn.primary:hover {
-            background-color: var(--accent-hover);
-        }
+
         .container {
+            width: 100%;
+            max-width: 800px;
             background: var(--container-bg);
-            backdrop-filter: blur(16px);
+            backdrop-filter: blur(12px);
             border: 1px solid var(--border-color);
             border-radius: 24px;
             padding: 40px;
-            width: 100%;
-            max-width: 720px;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            text-align: center;
+            animation: fadeIn 0.6s ease-out;
         }
-        h1 {
-            font-size: 1.5rem;
-            margin-bottom: 8px;
-            background: linear-gradient(to right, #60a5fa, #a78bfa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-        p.subtitle {
-            color: var(--text-secondary);
-            font-size: 0.875rem;
-            margin-bottom: 24px;
-        }
-        /* ── Stock Search Section ───────────────────────────────── */
-        .search-section {
-            margin-bottom: 28px;
-            text-align: left;
-        }
-        .search-section h2 {
-            font-size: 1rem;
-            color: var(--text-secondary);
-            margin-bottom: 12px;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            font-weight: 600;
-        }
-        .search-row {
+
+        h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.025em; }
+        .subtitle { color: var(--text-secondary); margin-bottom: 32px; font-size: 1rem; }
+
+        .top-nav {
+            position: absolute;
+            top: 40px;
+            right: 40px;
             display: flex;
-            gap: 10px;
+            gap: 12px;
         }
-        .search-row input[type="text"] {
-            flex: 1;
-            padding: 12px 16px;
-            border-radius: 10px;
+
+        .nav-btn {
+            background: rgba(255, 255, 255, 0.05);
             border: 1px solid var(--border-color);
-            background: rgba(255,255,255,0.06);
             color: var(--text-primary);
-            font-size: 0.95rem;
-            outline: none;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-        .search-row input[type="text"]:focus {
-            border-color: var(--accent-color);
-            box-shadow: 0 0 0 3px rgba(59,130,246,0.25);
-        }
-        .search-row input[type="text"]::placeholder {
-            color: var(--text-secondary);
-            opacity: 0.6;
-        }
-        .search-row select {
-            padding: 12px 14px;
-            border-radius: 10px;
-            border: 1px solid var(--border-color);
-            background: rgba(255,255,255,0.06);
-            color: var(--text-primary);
+            padding: 10px 20px;
+            border-radius: 12px;
+            text-decoration: none;
             font-size: 0.9rem;
-            outline: none;
+            font-weight: 500;
+            transition: all 0.2s;
             cursor: pointer;
-            min-width: 90px;
         }
-        .search-row select option {
-            background: #1e293b;
-            color: #f8fafc;
-        }
-        .search-btn {
-            padding: 12px 24px;
-            border-radius: 10px;
-            border: none;
-            background: linear-gradient(135deg, var(--accent-color), #6366f1);
-            color: #fff;
-            font-size: 0.95rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.15s, box-shadow 0.2s;
-            white-space: nowrap;
-        }
-        .search-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 4px 16px rgba(59,130,246,0.35);
-        }
-        .search-btn:active {
-            transform: scale(0.97);
-        }
-        .search-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-        /* ── Search Results ─────────────────────────────────────── */
-        #search-results {
-            margin-top: 16px;
-            display: none;
-            text-align: left;
-        }
-        #search-results .results-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-            font-size: 0.85rem;
-            color: var(--text-secondary);
-        }
-        #search-results .results-header .latency {
-            font-family: 'Courier New', monospace;
-            color: var(--accent-color);
-        }
-        #search-results table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.82rem;
-        }
-        #search-results thead th {
-            padding: 10px 8px;
-            text-align: left;
-            color: var(--text-secondary);
-            font-weight: 600;
-            border-bottom: 1px solid var(--border-color);
-            text-transform: uppercase;
-            font-size: 0.72rem;
-            letter-spacing: 0.06em;
-        }
-        #search-results tbody tr {
-            transition: background 0.15s;
-        }
-        #search-results tbody tr:hover {
-            background: rgba(59,130,246,0.08);
-        }
-        #search-results tbody td {
-            padding: 9px 8px;
-            border-bottom: 1px solid rgba(255,255,255,0.04);
-            color: var(--text-primary);
-        }
-        /* ── Error Display ──────────────────────────────────────── */
-        .search-error {
-            margin-top: 14px;
-            padding: 16px;
-            border-radius: 10px;
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid var(--error-color);
-            color: var(--error-color);
-            font-size: 0.85rem;
-            text-align: left;
-            display: none;
-            word-break: break-word;
-        }
-        .search-error pre {
-            margin-top: 8px;
-            font-size: 0.78rem;
-            white-space: pre-wrap;
-            color: #fca5a5;
-        }
-        .msg-box {
-            margin-bottom: 24px;
-            padding: 20px;
-            border-radius: 12px;
-            display: none;
-        }
-        .msg-box.success {
-            display: block;
-            background: rgba(16, 185, 129, 0.1);
-            border: 1px solid var(--success-color);
-            color: var(--success-color);
-        }
-        .msg-box.error {
-            display: block;
-            background: rgba(239, 68, 68, 0.1);
-            border: 1px solid var(--error-color);
-            color: var(--error-color);
-        }
-        #margin-display {
-            display: none;
-            margin-top: 24px;
-            background: var(--margin-bg);
-            border: 1px solid var(--accent-color);
-            border-radius: 12px;
-            padding: 24px;
-            text-align: left;
-        }
+
+        .nav-btn:hover { background: rgba(255, 255, 255, 0.1); border-color: var(--accent-color); }
+        .nav-btn.primary { background: var(--accent-color); color: #000; border: none; }
+        .nav-btn.primary:hover { background: var(--accent-hover); transform: translateY(-1px); }
+
+        /* Search Styles */
+        .search-section { margin-bottom: 32px; background: rgba(0,0,0,0.2); padding: 24px; border-radius: 16px; border: 1px solid var(--border-color); }
+        .search-section h2 { font-size: 1.1rem; margin-bottom: 16px; color: var(--accent-color); display: flex; align-items: center; gap: 8px; }
+        .search-row { display: flex; gap: 12px; margin-bottom: 12px; }
+        .search-row input { flex: 1; background: #000; border: 1px solid var(--border-color); border-radius: 10px; padding: 12px 16px; color: #fff; font-size: 1rem; outline: none; }
+        .search-row input:focus { border-color: var(--accent-color); }
+        .search-row select { background: #000; border: 1px solid var(--border-color); border-radius: 10px; padding: 0 12px; color: #fff; cursor: pointer; }
+        .search-btn { background: var(--accent-color); color: #000; border: none; border-radius: 10px; padding: 0 24px; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .search-btn:hover { background: var(--accent-hover); }
+        .search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        #search-results { margin-top: 16px; display: none; }
+        #search-results table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        #search-results th { text-align: left; padding: 12px; border-bottom: 2px solid var(--border-color); color: var(--text-secondary); font-weight: 500; }
+        #search-results td { padding: 12px; border-bottom: 1px solid var(--border-color); }
+        #search-results tr:last-child td { border: none; }
+        .results-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border-color); }
+        .latency { font-size: 0.75rem; color: var(--text-secondary); background: rgba(255,255,255,0.05); padding: 2px 8px; border-radius: 4px; }
+
+        .search-error { display: none; margin-top: 16px; padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid var(--error-color); border-radius: 10px; color: #ff9999; font-size: 0.9rem; overflow-x: auto; }
+
         .spinner {
             display: none;
-            width: 24px;
-            height: 24px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(56, 189, 248, 0.1);
+            border-top: 3px solid var(--accent-color);
             border-radius: 50%;
-            border-top-color: var(--accent-color);
-            animation: spin 1s ease-in-out infinite;
-            margin: 0 auto 16px auto;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
         }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        #margin-display {
+            margin-top: 24px;
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            display: none;
         }
     </style>
 </head>
@@ -335,67 +190,73 @@ try {
             <div id="search-error" class="search-error"></div>
             <div id="search-results"></div>
         </div>
+
         <hr style="border:none;border-top:1px solid var(--border-color);margin-bottom:24px;">
 
         <?php if (isset($_GET['success']) && $_GET['success'] == '1'): ?>
-            <div class="msg-box success">
-                <strong>Authentication Successful!</strong><br>
-                The Access Token for today has been safely stored. You can now fetch your margin limits.
+            <div style="background:rgba(34, 197, 94, 0.1); border:1px solid var(--success-color); padding:16px; border-radius:12px; color:var(--success-color); margin-bottom:24px; font-size:0.9rem">
+                <strong>Success!</strong> The Access Token for today has been safely stored. You can now fetch your margin limits.
+            </div>
+        <?php elseif (isset($_GET['error'])): ?>
+            <div style="background:rgba(239, 68, 68, 0.1); border:1px solid var(--error-color); padding:16px; border-radius:12px; color:var(--error-color); margin-bottom:24px; font-size:0.9rem">
+                <strong>Authentication Failed:</strong> <?= htmlspecialchars($_GET['error']) ?>
             </div>
         <?php endif; ?>
-
-        <?php if (isset($_GET['error']) && !empty($_GET['error'])): ?>
-            <div class="msg-box error">
-                <strong>Authentication Failed!</strong><br>
-                <?= htmlspecialchars($_GET['error']) ?>
-            </div>
-        <?php endif; ?>
-
+        
+        <!-- Loading spinner for API tasks -->
         <div id="loader" class="spinner"></div>
+
+        <!-- Displays output here -->
         <div id="margin-display"></div>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const displayArea = document.getElementById('margin-display');
-            const loader = document.getElementById('loader');
-
-            // ── Stock Search Handler ─────────────────────────────────────────
+            const searchBtn     = document.getElementById('searchBtn');
             const searchInput   = document.getElementById('searchInput');
             const exchangeSel   = document.getElementById('exchangeSelect');
-            const searchBtn     = document.getElementById('searchBtn');
             const searchResults = document.getElementById('search-results');
             const searchError   = document.getElementById('search-error');
+            const displayArea   = document.getElementById('margin-display');
+            const loader        = document.getElementById('loader');
 
             async function executeSearch() {
                 const stext = searchInput.value.trim();
-                if (!stext) { searchInput.focus(); return; }
+                if (!stext) return;
 
-                // Reset UI
-                searchResults.style.display = 'none';
+                searchBtn.disabled    = true;
+                searchBtn.textContent = 'Searching...';
                 searchError.style.display   = 'none';
-                searchBtn.disabled          = true;
-                searchBtn.textContent       = 'Searching…';
+                searchResults.style.display = 'none';
 
                 try {
-                    const res = await fetch('api/search_scrip.php', {
+                    // VERSIONED API TO BYPASS OPCACHE
+                    const res = await fetch('api_v4/search_scrip_v4.php', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ stext: stext, exch: exchangeSel.value })
                     });
 
-                    const data = await res.json();
-
-                    if (data.s !== 'success') {
-                        // ── Show error clearly ──────────────────────────────
+                    // Hardened JSON Parsing
+                    const text = await res.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
                         searchError.style.display = 'block';
-                        searchError.innerHTML = `<strong>API Error (HTTP ${res.status})</strong>: ${data.m || 'Unknown error'}`
-                            + (data.debug ? `<pre>${data.debug}</pre>` : '')
-                            + `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+                        searchError.innerHTML = `<strong>Invalid Server Response (Non-JSON)</strong><pre>${text}</pre>`;
                         return;
                     }
 
-                    // ── Render results table ────────────────────────────────
+                    if (data.s === 'error') {
+                        searchError.style.display = 'block';
+                        searchError.innerHTML = `<strong>API Error</strong><br>${data.m || 'Unknown error'}` 
+                            + (data.debug ? `<hr><small>${data.debug}</small>` : '')
+                            + (data.file ? `<br><small>File: ${data.file}:${data.line}</small>` : '');
+                        return;
+                    }
+
+                    // Render results table
                     const items = data.payload?.values || data.payload || [];
                     if (!Array.isArray(items) || items.length === 0) {
                         searchResults.style.display = 'block';
@@ -438,7 +299,7 @@ try {
                 if (e.key === 'Enter') executeSearch();
             });
 
-            // ── Margin Fetch Handler ─────────────────────────────────────────
+            // Margin Fetch Handler
             const fetchBtn = document.getElementById('fetchMarginBtn');
             if (fetchBtn) {
                 fetchBtn.addEventListener('click', async () => {
@@ -478,37 +339,31 @@ try {
                 });
             }
 
-            // ── Place Order Handler ──────────────────────────────────────────
+            // Place Order Handler
             const orderBtn = document.getElementById('placeOrderBtn');
             if (orderBtn) {
                 orderBtn.addEventListener('click', async () => {
                     displayArea.style.display = 'none';
                     loader.style.display = 'block';
-                    const t0 = performance.now();
                     try {
                         const res = await fetch('api/signal_router.php', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer __REPLACE_WITH_LIVE_TOKEN__' },
+                            headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 action: 'place', exch: 'NSE', tsym: 'ACC-EQ', qty: '1',
                                 prc: '1400', prd: 'I', trantype: 'B', prctyp: 'LMT', ret: 'DAY'
                             })
                         });
                         const data = await res.json();
-                        const dt = performance.now() - t0;
                         loader.style.display = 'none';
                         displayArea.style.display = 'block';
                         displayArea.innerHTML = `
                             <h2 style="font-size:1.1rem;margin-bottom:12px;color:var(--success-color)">Signal Dispatched</h2>
-                            <div style="background:rgba(255,255,255,0.03);padding:16px;border-radius:8px;margin-bottom:16px;border-left:4px solid var(--accent-color)">
-                                <div><strong style="color:var(--accent-color);font-size:1.2rem">Round-trip: ${dt.toFixed(1)} ms</strong></div>
-                                <div>Request ID: <code>${data.request_id||'N/A'}</code></div>
-                            </div>
                             <pre style="font-size:0.8rem;overflow-x:auto;color:var(--text-secondary)">${JSON.stringify(data,null,2)}</pre>`;
                     } catch {
                         loader.style.display = 'none';
                         displayArea.style.display = 'block';
-                        displayArea.innerHTML = `<span style="color:var(--error-color)">Request Failed</span>`;
+                        displayArea.innerHTML = `<span style="color:var(--error-color)">Order Request Failed</span>`;
                     }
                 });
             }
