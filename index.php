@@ -1,5 +1,11 @@
 <?php
 declare(strict_types=1);
+
+// Disable Caching
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Cache-Control: post-check=0, pre-check=0", false);
+header("Pragma: no-cache");
+
 date_default_timezone_set('Asia/Kolkata');
 
 // Hardcoded — no Dotenv, no autoloader overhead
@@ -311,9 +317,9 @@ try {
         <h1>Flattrade OAuth Dashboard</h1>
         <p class="subtitle">Secure API Integration Engine</p>
 
-        <!-- ── Stock Search ────────────────────────────────────── -->
+        <!-- Scrip Search Section -->
         <div class="search-section">
-            <h2>🔍 Scrip Search</h2>
+            <h2>Scrip Search</h2>
             <div class="search-row">
                 <input type="text" id="searchInput" placeholder="e.g. NIFTY, BANKNIFTY, RELIANCE …" autocomplete="off" />
                 <select id="exchangeSelect">
