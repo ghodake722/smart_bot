@@ -345,7 +345,7 @@ try {
             const searchStatus = document.getElementById('search-status');
             const displayArea = document.getElementById('margin-display');
             const loader = document.getElementById('loader');
-            const searchEndpoint = 'api_v4/search_scrip_v4.php';
+            const searchEndpoint = 'api/search_scrip.php';
 
             function escapeHtml(value) {
                 return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
