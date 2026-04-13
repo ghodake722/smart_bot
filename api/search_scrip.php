@@ -39,8 +39,12 @@ try {
         exit;
     }
 
-    $stext = trim($input['stext']);
-    $exch  = trim($input['exch'] ?? 'NSE');
+    $stext = trim((string)$input['stext']);
+    $exch  = strtoupper(trim((string)($input['exch'] ?? 'NFO')));
+    $allowedExchanges = ['NFO', 'NSE', 'BSE', 'BFO', 'CDS', 'MCX'];
+    if ($exch === '' || !in_array($exch, $allowedExchanges, true)) {
+        $exch = 'NFO';
+    }
 
     // ── Resolve Session Token (Redis → MySQL → Write-Back, 1hr TTL) ─────────
     $access_token = ft_resolve_session_token();
