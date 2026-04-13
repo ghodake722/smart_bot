@@ -20,6 +20,16 @@ require_once __DIR__ . '/engine.php';
 
 ft_enforce_method('POST');
 
+if (!function_exists('ft_resolve_session_token')) {
+    http_response_code(500);
+    echo json_encode([
+        's' => 'error',
+        'm' => 'Critical Error: Trading Engine Core missing (ft_resolve_session_token)',
+        'debug' => 'Included files: ' . json_encode(get_included_files())
+    ]);
+    exit;
+}
+
 try {
     // ── Parse & Validate Input ──────────────────────────────────────────────
     $input = json_decode(file_get_contents('php://input'), true);
@@ -64,6 +74,8 @@ try {
     echo json_encode([
         's' => 'error',
         'm' => $e->getMessage(),
-        'debug' => $e->getFile() . ':' . $e->getLine(),
+        'file' => $e->getFile(),
+        'line' => $e->getLine(),
+        'trace' => $e->getTraceAsString()
     ]);
 }
