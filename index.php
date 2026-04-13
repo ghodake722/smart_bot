@@ -14,6 +14,7 @@ $db_user = 'mytptd_c1_root';
 $db_pass = 'ptP_*yOV?7QM';
 
 $hasFreshToken = false;
+$dashboardAuthToken = null;
 
 try {
     $pdo = new PDO(
@@ -23,12 +24,29 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
     $stmt = $pdo->query(
-        "SELECT id FROM flattrade_tokens
+        "SELECT id, client_id, header_auth_token FROM flattrade_tokens
          WHERE DATE(updated_at) = CURDATE()
          ORDER BY updated_at DESC LIMIT 1"
     );
-    $hasFreshToken = (bool)$stmt->fetch(PDO::FETCH_ASSOC);
-} catch (PDOException $e) {
+    $tokenRow = $stmt->fetch(PDO::FETCH_ASSOC);
+    $hasFreshToken = (bool)$tokenRow;
+
+    if ($tokenRow) {
+        $dashboardAuthToken = $tokenRow['header_auth_token'] ?? null;
+        if (!$dashboardAuthToken) {
+            $dashboardAuthToken = bin2hex(random_bytes(32));
+            $update = $pdo->prepare(
+                'UPDATE flattrade_tokens
+                 SET header_auth_token = :hat
+                 WHERE id = :id'
+            );
+            $update->execute([
+                ':hat' => $dashboardAuthToken,
+                ':id' => $tokenRow['id'],
+            ]);
+        }
+    }
+} catch (Throwable $e) {
     // Keep dashboard usable even when DB health checks fail.
 }
 ?>
@@ -132,6 +150,8 @@ try {
             padding: 24px;
             border-radius: 16px;
             border: 1px solid var(--border-color);
+            display: block;
+            visibility: visible;
         }
 
         .search-section h2 {
@@ -337,6 +357,7 @@ try {
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            const dashboardAuthToken = <?= json_encode($dashboardAuthToken, JSON_UNESCAPED_SLASHES) ?>;
             const searchBtn = document.getElementById('searchBtn');
             const searchInput = document.getElementById('searchInput');
             const exchangeSel = document.getElementById('exchangeSelect');
@@ -504,12 +525,21 @@ try {
                     displayArea.style.display = 'none';
                     loader.style.display = 'block';
 
+                    if (!dashboardAuthToken) {
+                        loader.style.display = 'none';
+                        displayArea.style.display = 'block';
+                        displayArea.innerHTML = '<span style="color:var(--error-color)">No dashboard auth token is available. Login again to refresh the session.</span>';
+                        return;
+                    }
+
                     try {
-                        const res = await fetch('api/signal_router.php', {
+                        const res = await fetch('api/place_order.php', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer ' + dashboardAuthToken
+                            },
                             body: JSON.stringify({
-                                action: 'place',
                                 exch: 'NSE',
                                 tsym: 'ACC-EQ',
                                 qty: '1',
@@ -520,16 +550,17 @@ try {
                                 ret: 'DAY'
                             })
                         });
-                        const data = await res.json();
+                        const text = await res.text();
+                        const data = JSON.parse(text);
                         loader.style.display = 'none';
                         displayArea.style.display = 'block';
                         displayArea.innerHTML = `
-                            <h2 style="font-size:1.1rem;margin-bottom:12px;color:var(--success-color)">Signal Dispatched</h2>
+                            <h2 style="font-size:1.1rem;margin-bottom:12px;color:${data.s === 'success' ? 'var(--success-color)' : 'var(--error-color)'}">${data.s === 'success' ? 'Order Response' : 'Order Failed'}</h2>
                             <pre style="font-size:0.8rem;overflow-x:auto;color:var(--text-secondary)">${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
-                    } catch {
+                    } catch (err) {
                         loader.style.display = 'none';
                         displayArea.style.display = 'block';
-                        displayArea.innerHTML = '<span style="color:var(--error-color)">Order Request Failed</span>';
+                        displayArea.innerHTML = `<span style="color:var(--error-color)">Order Request Failed: ${escapeHtml(err.message || 'Unknown error')}</span>`;
                     }
                 });
             }

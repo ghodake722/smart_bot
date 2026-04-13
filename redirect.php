@@ -15,6 +15,9 @@ $db_host    = 'localhost';
 $db_name    = 'mytptd_c1_db';
 $db_user    = 'mytptd_c1_root';
 $db_pass    = 'ptP_*yOV?7QM';
+$redis_host = '127.0.0.1';
+$redis_port = 6379;
+$user_id    = 'FT041391';
 
 try {
     if (!isset($_GET['code']) || empty($_GET['code'])) {
@@ -55,8 +58,9 @@ try {
         throw new Exception('API Rejected: ' . ($data['emsg'] ?? 'Unknown error'));
     }
 
-    $client_id    = $data['client'] ?? '';
-    $access_token = $data['token'] ?? '';
+    $client_id         = $data['client'] ?? '';
+    $access_token      = $data['token'] ?? '';
+    $header_auth_token = bin2hex(random_bytes(32));
 
     if (empty($client_id) || empty($access_token)) {
         throw new Exception('API returned Ok but missing client/token fields');
@@ -70,13 +74,33 @@ try {
     );
 
     $stmt = $pdo->prepare(
-        'INSERT INTO flattrade_tokens (client_id, access_token)
-         VALUES (:cid, :tok)
+        'INSERT INTO flattrade_tokens (client_id, access_token, header_auth_token)
+         VALUES (:cid, :tok, :hat)
          ON DUPLICATE KEY UPDATE
          access_token = VALUES(access_token),
+         header_auth_token = VALUES(header_auth_token),
          updated_at = CURRENT_TIMESTAMP'
     );
-    $stmt->execute([':cid' => $client_id, ':tok' => $access_token]);
+    $stmt->execute([
+        ':cid' => $client_id,
+        ':tok' => $access_token,
+        ':hat' => $header_auth_token,
+    ]);
+
+    if (class_exists('Redis')) {
+        try {
+            $redis = new Redis();
+            $redis->connect($redis_host, $redis_port, 2.0);
+            $redis->setex('ft_session_token:' . $user_id, 3600, $access_token);
+            $redis->setex(
+                'flattrade_auth:' . hash('sha1', $header_auth_token),
+                86400,
+                json_encode(['client_id' => $client_id])
+            );
+        } catch (Throwable) {
+            // Ignore Redis write failures during callback; MySQL remains the source of truth.
+        }
+    }
 
     header('Location: index.php?success=1');
     exit;
