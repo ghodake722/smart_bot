@@ -14,11 +14,5 @@ if (!$input) {
     exit;
 }
 
-$session = ft_authenticate(
-    ft_extract_bearer(),
-    ft_extract_requested_user_id($input),
-    ft_extract_requested_session_token($input)
-);
-
-unset($input['user_id'], $input['session_token']);
+$session = ft_authenticate_fast(ft_extract_bearer());
 ft_place_order($input, $session, true);

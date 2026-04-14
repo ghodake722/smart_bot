@@ -20,13 +20,9 @@ try {
         $exch = 'NFO';
     }
 
-    $session = ft_authenticate(
-        ft_extract_bearer(),
-        ft_extract_requested_user_id($input),
-        ft_extract_requested_session_token($input)
-    );
-
+    $session = ft_authenticate_search(ft_extract_bearer());
     $result = ft_search_scrip($stext, $exch, $session);
+
     if ($result['s'] !== 'success') {
         http_response_code(400);
         echo json_encode([

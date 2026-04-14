@@ -6,17 +6,7 @@ require_once __DIR__ . '/api/engine.php';
 ft_enforce_method('POST');
 
 try {
-    $input = json_decode(file_get_contents('php://input'), true);
-    if (!is_array($input)) {
-        $input = [];
-    }
-
-    $session = ft_authenticate(
-        ft_extract_bearer(),
-        ft_extract_requested_user_id($input),
-        ft_extract_requested_session_token($input)
-    );
-
+    $session = ft_authenticate_fast(ft_extract_bearer());
     $result = ft_fetch_margin($session);
 
     if ($result['s'] === 'success') {

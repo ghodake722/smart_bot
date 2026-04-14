@@ -16,6 +16,7 @@ define('FT_BROKER_BASE', 'https://piconnect.flattrade.in/PiConnectAPI/');
 define('FT_CURL_TIMEOUT_MS', 500);
 define('FT_TOKEN_TTL', 3600);
 define('FT_SESSION_MAX_AGE', 3600);
+define('FT_AUTH_COOKIE', 'ft_dashboard_auth');
 
 function ft_audit_log(string $event, string $message, string $source = 'redis', ?int $ttl = null): void
 {
@@ -52,6 +53,27 @@ function ft_auth_cache_key(string $bearerToken): string
     return 'flattrade_auth:' . hash('sha1', $bearerToken);
 }
 
+function ft_is_https_request(): bool
+{
+    $https = $_SERVER['HTTPS'] ?? '';
+    return $https !== '' && strtolower((string)$https) !== 'off';
+}
+
+function ft_set_dashboard_auth_cookie(string $token): void
+{
+    if ($token === '' || headers_sent()) {
+        return;
+    }
+
+    setcookie(FT_AUTH_COOKIE, $token, [
+        'expires' => time() + FT_REDIS_TTL,
+        'path' => '/',
+        'secure' => ft_is_https_request(),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
 function ft_normalize_session_row(array $row): array
 {
     return [
@@ -66,17 +88,13 @@ function ft_normalize_session_row(array $row): array
 function ft_is_session_bundle_fresh(array $bundle): bool
 {
     $cachedAt = (int)($bundle['cached_at'] ?? 0);
-    if ($cachedAt <= 0) {
-        return false;
-    }
-
-    return (time() - $cachedAt) < FT_SESSION_MAX_AGE;
+    return $cachedAt > 0 && (time() - $cachedAt) < FT_SESSION_MAX_AGE;
 }
 
 function ft_cache_session_token(string $token, int $ttl = FT_TOKEN_TTL): void
 {
     $redis = RedisPool::get();
-    if ($redis === null) {
+    if ($redis === null || $token === '') {
         return;
     }
 
@@ -105,7 +123,7 @@ function ft_delete_session_cache(): void
 function ft_cache_auth_identity(string $bearerToken, string $clientId): void
 {
     $redis = RedisPool::get();
-    if ($redis === null || $bearerToken === '') {
+    if ($redis === null || $bearerToken === '' || $clientId === '') {
         return;
     }
 
@@ -128,13 +146,8 @@ function ft_cache_session_bundle(array $row, int $ttl = FT_TOKEN_TTL): array
         }
     }
 
-    if ($bundle['access_token'] !== '') {
-        ft_cache_session_token($bundle['access_token'], $ttl);
-    }
-
-    if ($bundle['header_auth_token'] !== '' && $bundle['client_id'] !== '') {
-        ft_cache_auth_identity($bundle['header_auth_token'], $bundle['client_id']);
-    }
+    ft_cache_session_token($bundle['access_token'], $ttl);
+    ft_cache_auth_identity($bundle['header_auth_token'], $bundle['client_id']);
 
     return $bundle;
 }
@@ -152,8 +165,8 @@ function ft_get_latest_session_row(): array
     $stmt->execute();
     $row = $stmt->fetch();
 
-    if (!$row || empty($row['access_token'])) {
-        ft_audit_log('TOKEN_ERROR', 'No active session token found in MySQL for today', 'mysql');
+    if (!$row || empty($row['access_token']) || empty($row['header_auth_token'])) {
+        ft_audit_log('TOKEN_ERROR', 'No active session credentials found in MySQL for today', 'mysql');
         throw new Exception('No active session token. Please login with Flattrade.');
     }
 
@@ -162,52 +175,85 @@ function ft_get_latest_session_row(): array
 
 function ft_refresh_session_from_db(): array
 {
-    $row = ft_get_latest_session_row();
-    $bundle = ft_cache_session_bundle($row, FT_TOKEN_TTL);
-
-    ft_audit_log(
-        'TOKEN_REFRESH',
-        'Credentials fetched from MySQL and cached in Redis (TTL: ' . FT_TOKEN_TTL . 's)',
-        'mysql',
-        FT_TOKEN_TTL
-    );
-
+    $bundle = ft_cache_session_bundle(ft_get_latest_session_row(), FT_TOKEN_TTL);
+    ft_audit_log('TOKEN_REFRESH', 'Credentials fetched from MySQL and cached in Redis (TTL: ' . FT_TOKEN_TTL . 's)', 'mysql', FT_TOKEN_TTL);
     return $bundle;
+}
+
+function ft_get_cached_session_bundle(bool $requireFresh = false): ?array
+{
+    $redis = RedisPool::get();
+    if ($redis === null) {
+        return null;
+    }
+
+    try {
+        $cached = $redis->get(ft_session_bundle_cache_key());
+        if ($cached === false) {
+            return null;
+        }
+
+        $bundle = json_decode($cached, true);
+        if (!is_array($bundle)) {
+            return null;
+        }
+
+        $bundle = ft_normalize_session_row($bundle);
+        if ($requireFresh && !ft_is_session_bundle_fresh($bundle)) {
+            return null;
+        }
+
+        return $bundle;
+    } catch (RedisException) {
+        return null;
+    }
 }
 
 function ft_resolve_session_bundle(bool $forceRefresh = false): array
 {
-    $redis = null;
-    try {
-        $redis = RedisPool::get();
-    } catch (\Throwable) {
-        $redis = null;
-    }
-
-    if (!$forceRefresh && $redis !== null) {
-        try {
-            $cached = $redis->get(ft_session_bundle_cache_key());
-            if ($cached !== false) {
-                $bundle = json_decode($cached, true);
-                if (is_array($bundle) && ft_is_session_bundle_fresh($bundle)) {
-                    $ttl = $redis->ttl(ft_session_bundle_cache_key());
-                    ft_audit_log('TOKEN_HIT', 'Redis cache hit - serving cached credentials', 'redis', ($ttl > 0 ? $ttl : null));
-                    return ft_normalize_session_row($bundle);
+    if (!$forceRefresh) {
+        $bundle = ft_get_cached_session_bundle(true);
+        if ($bundle !== null) {
+            $redis = RedisPool::get();
+            $ttl = null;
+            if ($redis !== null) {
+                try {
+                    $ttlValue = $redis->ttl(ft_session_bundle_cache_key());
+                    $ttl = $ttlValue > 0 ? $ttlValue : null;
+                } catch (RedisException) {
+                    $ttl = null;
                 }
             }
-            ft_audit_log('TOKEN_MISS', 'Redis credentials missing or stale - falling back to MySQL', 'redis');
-        } catch (RedisException) {
-            ft_audit_log('TOKEN_ERROR', 'Redis read failed - falling back to MySQL', 'redis');
+            ft_audit_log('TOKEN_HIT', 'Redis cache hit - serving cached credentials', 'redis', $ttl);
+            return $bundle;
         }
+
+        ft_audit_log('TOKEN_MISS', 'Redis credentials missing or stale - falling back to MySQL', 'redis');
     }
 
     return ft_refresh_session_from_db();
 }
 
+function ft_fast_session_bundle(): array
+{
+    $bundle = ft_get_cached_session_bundle(false);
+    if ($bundle === null) {
+        http_response_code(401);
+        echo '{"s":"error","m":"Unauthorized: Search once or login again to warm Redis credentials"}';
+        exit;
+    }
+
+    return $bundle;
+}
+
 function ft_resolve_session_token(bool $forceRefresh = false): string
 {
-    $bundle = ft_resolve_session_bundle($forceRefresh);
-    return (string)$bundle['access_token'];
+    return (string)ft_resolve_session_bundle($forceRefresh)['access_token'];
+}
+
+function ft_fast_token(): string
+{
+    return (string)ft_fast_session_bundle()['access_token'];
 }
 
 final class RedisPool
@@ -313,51 +359,24 @@ function ft_enforce_method(string $expected): void
 function ft_extract_bearer(): string
 {
     if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
-        $value = $_SERVER['HTTP_AUTHORIZATION'];
+        $value = (string)$_SERVER['HTTP_AUTHORIZATION'];
         return (strncasecmp($value, 'Bearer ', 7) === 0) ? substr($value, 7) : $value;
     }
 
     if (!empty($_SERVER['HTTP_X_AUTH_TOKEN'])) {
-        return $_SERVER['HTTP_X_AUTH_TOKEN'];
+        return (string)$_SERVER['HTTP_X_AUTH_TOKEN'];
+    }
+
+    if (!empty($_COOKIE[FT_AUTH_COOKIE])) {
+        return (string)$_COOKIE[FT_AUTH_COOKIE];
     }
 
     http_response_code(401);
-    echo '{"s":"error","m":"Unauthorized: No Bearer token"}';
+    echo '{"s":"error","m":"Unauthorized: No dashboard auth token"}';
     exit;
 }
 
-function ft_extract_requested_user_id(array $input = []): ?string
-{
-    if (!empty($_SERVER['HTTP_X_USER_ID'])) {
-        return trim((string)$_SERVER['HTTP_X_USER_ID']);
-    }
-
-    if (isset($input['user_id'])) {
-        return trim((string)$input['user_id']);
-    }
-
-    return null;
-}
-
-function ft_extract_requested_session_token(array $input = []): ?string
-{
-    if (!empty($_SERVER['HTTP_X_SESSION_TOKEN'])) {
-        return trim((string)$_SERVER['HTTP_X_SESSION_TOKEN']);
-    }
-
-    if (isset($input['session_token'])) {
-        return trim((string)$input['session_token']);
-    }
-
-    return null;
-}
-
-function ft_fast_token(): string
-{
-    return ft_resolve_session_token();
-}
-
-function ft_validate_session_context(array $session, ?string $providedUserId = null, ?string $providedSessionToken = null): array
+function ft_validate_session_context(array $session): array
 {
     $clientId = (string)($session['client_id'] ?? '');
     $accessToken = (string)($session['access_token'] ?? '');
@@ -374,33 +393,33 @@ function ft_validate_session_context(array $session, ?string $providedUserId = n
         exit;
     }
 
-    if ($providedUserId !== null && $providedUserId !== '' && !hash_equals($clientId, $providedUserId)) {
-        http_response_code(401);
-        echo '{"s":"error","m":"Unauthorized: Invalid user ID"}';
-        exit;
-    }
-
-    if ($providedSessionToken !== null && $providedSessionToken !== '' && !hash_equals($accessToken, $providedSessionToken)) {
-        http_response_code(401);
-        echo '{"s":"error","m":"Unauthorized: Invalid session token"}';
-        exit;
-    }
-
     return $session;
 }
 
-function ft_authenticate(string $bearer_token, ?string $providedUserId = null, ?string $providedSessionToken = null): array
+function ft_authenticate_search(string $bearerToken): array
 {
-    $session = ft_resolve_session_bundle();
-    if (empty($session['header_auth_token']) || !hash_equals((string)$session['header_auth_token'], $bearer_token)) {
+    $session = ft_resolve_session_bundle(false);
+    if (empty($session['header_auth_token']) || !hash_equals((string)$session['header_auth_token'], $bearerToken)) {
         http_response_code(401);
         echo '{"s":"error","m":"Unauthorized: Invalid token"}';
         exit;
     }
 
-    ft_cache_auth_identity($bearer_token, (string)$session['client_id']);
+    ft_cache_auth_identity($bearerToken, (string)$session['client_id']);
+    return ft_validate_session_context($session);
+}
 
-    return ft_validate_session_context($session, $providedUserId, $providedSessionToken);
+function ft_authenticate_fast(string $bearerToken): array
+{
+    $session = ft_fast_session_bundle();
+    if (empty($session['header_auth_token']) || !hash_equals((string)$session['header_auth_token'], $bearerToken)) {
+        http_response_code(401);
+        echo '{"s":"error","m":"Unauthorized: Invalid token"}';
+        exit;
+    }
+
+    ft_cache_auth_identity($bearerToken, (string)$session['client_id']);
+    return ft_validate_session_context($session);
 }
 
 function ft_early_response(string $request_id): void
@@ -514,23 +533,19 @@ function ft_log_order(string $request_id, string $endpoint, array $payload, arra
 
 function ft_search_scrip(string $stext, string $exch, array $session): array
 {
-    $payload = [
+    return ft_dispatch('SearchScrip', [
         'uid' => (string)$session['client_id'],
         'stext' => $stext,
         'exch' => $exch,
-    ];
-
-    return ft_dispatch('SearchScrip', $payload, (string)$session['access_token'], false);
+    ], (string)$session['access_token'], false, true);
 }
 
 function ft_fetch_margin(array $session): array
 {
-    $payload = [
+    return ft_dispatch('Limits', [
         'uid' => (string)$session['client_id'],
         'actid' => (string)$session['client_id'],
-    ];
-
-    return ft_dispatch('Limits', $payload, (string)$session['access_token'], false);
+    ], (string)$session['access_token'], false, false);
 }
 
 function ft_place_order(array $payload, array $session, bool $echo = true): array
@@ -538,5 +553,5 @@ function ft_place_order(array $payload, array $session, bool $echo = true): arra
     $payload['uid'] = (string)$session['client_id'];
     $payload['actid'] = (string)$session['client_id'];
 
-    return ft_dispatch('PlaceOrder', $payload, (string)$session['access_token'], $echo);
+    return ft_dispatch('PlaceOrder', $payload, (string)$session['access_token'], $echo, false);
 }

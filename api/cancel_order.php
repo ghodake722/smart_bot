@@ -12,7 +12,6 @@ if (!is_array($input)) {
     $input = [];
 }
 
-// Support DELETE with query param fallback.
 if (empty($input['norenordno']) && isset($_GET['norenordno'])) {
     $input['norenordno'] = $_GET['norenordno'];
 }
@@ -23,15 +22,10 @@ if (empty($input['norenordno'])) {
     exit;
 }
 
-$session = ft_authenticate(
-    ft_extract_bearer(),
-    ft_extract_requested_user_id($input),
-    ft_extract_requested_session_token($input)
-);
-
+$session = ft_authenticate_fast(ft_extract_bearer());
 $payload = [
     'uid' => $session['client_id'],
     'norenordno' => $input['norenordno'],
 ];
 
-ft_dispatch('CancelOrder', $payload, $session['access_token'], true);
+ft_dispatch('CancelOrder', $payload, $session['access_token'], true, false);
