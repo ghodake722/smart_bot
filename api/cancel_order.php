@@ -6,23 +6,31 @@
 require_once __DIR__ . '/engine.php';
 
 ft_enforce_method('DELETE');
-$session = ft_authenticate(ft_extract_bearer());
 
 $input = json_decode(file_get_contents('php://input'), true);
-
-// Support DELETE with query param fallback
-if (!$input && isset($_GET['norenordno'])) {
-    $input = ['norenordno' => $_GET['norenordno']];
+if (!is_array($input)) {
+    $input = [];
 }
 
-if (!$input || empty($input['norenordno'])) {
+// Support DELETE with query param fallback.
+if (empty($input['norenordno']) && isset($_GET['norenordno'])) {
+    $input['norenordno'] = $_GET['norenordno'];
+}
+
+if (empty($input['norenordno'])) {
     http_response_code(400);
     echo '{"s":"error","m":"Missing norenordno for cancellation"}';
     exit;
 }
 
+$session = ft_authenticate(
+    ft_extract_bearer(),
+    ft_extract_requested_user_id($input),
+    ft_extract_requested_session_token($input)
+);
+
 $payload = [
-    'uid'        => $session['client_id'],
+    'uid' => $session['client_id'],
     'norenordno' => $input['norenordno'],
 ];
 

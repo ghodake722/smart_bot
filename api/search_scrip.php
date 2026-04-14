@@ -20,14 +20,13 @@ try {
         $exch = 'NFO';
     }
 
-    $accessToken = ft_resolve_session_token();
-    $payload = [
-        'uid' => FT_USER_ID,
-        'stext' => $stext,
-        'exch' => $exch,
-    ];
+    $session = ft_authenticate(
+        ft_extract_bearer(),
+        ft_extract_requested_user_id($input),
+        ft_extract_requested_session_token($input)
+    );
 
-    $result = ft_dispatch('SearchScrip', $payload, $accessToken, false);
+    $result = ft_search_scrip($stext, $exch, $session);
     if ($result['s'] !== 'success') {
         http_response_code(400);
         echo json_encode([

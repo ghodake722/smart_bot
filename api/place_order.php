@@ -6,7 +6,6 @@
 require_once __DIR__ . '/engine.php';
 
 ft_enforce_method('POST');
-$session = ft_authenticate(ft_extract_bearer());
 
 $input = json_decode(file_get_contents('php://input'), true);
 if (!$input) {
@@ -15,7 +14,11 @@ if (!$input) {
     exit;
 }
 
-$input['uid']   = $session['client_id'];
-$input['actid'] = $session['client_id'];
+$session = ft_authenticate(
+    ft_extract_bearer(),
+    ft_extract_requested_user_id($input),
+    ft_extract_requested_session_token($input)
+);
 
-ft_dispatch('PlaceOrder', $input, $session['access_token'], true);
+unset($input['user_id'], $input['session_token']);
+ft_place_order($input, $session, true);

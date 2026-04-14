@@ -10,10 +10,18 @@ require_once __DIR__ . '/engine.php';
 
 // ── Gate ─────────────────────────────────────────────────────────────────────
 ft_enforce_method('POST');
-$session = ft_authenticate(ft_extract_bearer());
 
 // ── Parse Signal ─────────────────────────────────────────────────────────────
 $signal = json_decode(file_get_contents('php://input'), true);
+if (!is_array($signal)) {
+    $signal = [];
+}
+
+$session = ft_authenticate(
+    ft_extract_bearer(),
+    ft_extract_requested_user_id($signal),
+    ft_extract_requested_session_token($signal)
+);
 
 if (!$signal || !isset($signal['action'])) {
     http_response_code(400);
@@ -22,7 +30,7 @@ if (!$signal || !isset($signal['action'])) {
 }
 
 $action = strtolower(trim($signal['action']));
-unset($signal['action']);
+unset($signal['action'], $signal['user_id'], $signal['session_token']);
 
 // ── Resolve Endpoint ────────────────────────────────────────────────────────
 $map = ['place' => 'PlaceOrder', 'modify' => 'ModifyOrder', 'cancel' => 'CancelOrder'];
@@ -65,3 +73,4 @@ ft_early_response($request_id);
 // ═══════════════════════════════════════════════════════════════════════════
 $result = ft_dispatch($endpoint, $signal, $session['access_token']);
 ft_log_order($request_id, $endpoint, $signal, $result);
+

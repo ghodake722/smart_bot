@@ -15,8 +15,6 @@ $db_pass = 'ptP_*yOV?7QM';
 
 $hasFreshToken = false;
 $dashboardAuthToken = null;
-$dashboardUserId = null;
-$dashboardSessionToken = null;
 
 try {
     $pdo = new PDO(
@@ -26,7 +24,7 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
     $stmt = $pdo->query(
-        "SELECT id, client_id, access_token, header_auth_token FROM flattrade_tokens
+        "SELECT id, client_id, header_auth_token FROM flattrade_tokens
          WHERE DATE(updated_at) = CURDATE()
          ORDER BY updated_at DESC LIMIT 1"
     );
@@ -35,8 +33,6 @@ try {
 
     if ($tokenRow) {
         $dashboardAuthToken = $tokenRow['header_auth_token'] ?? null;
-        $dashboardUserId = $tokenRow['client_id'] ?? null;
-        $dashboardSessionToken = $tokenRow['access_token'] ?? null;
         if (!$dashboardAuthToken) {
             $dashboardAuthToken = bin2hex(random_bytes(32));
             $update = $pdo->prepare(
@@ -362,8 +358,6 @@ try {
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const dashboardAuthToken = <?= json_encode($dashboardAuthToken, JSON_UNESCAPED_SLASHES) ?>;
-            const dashboardUserId = <?= json_encode($dashboardUserId, JSON_UNESCAPED_SLASHES) ?>;
-            const dashboardSessionToken = <?= json_encode($dashboardSessionToken, JSON_UNESCAPED_SLASHES) ?>;
             const searchBtn = document.getElementById('searchBtn');
             const searchInput = document.getElementById('searchInput');
             const exchangeSel = document.getElementById('exchangeSelect');
@@ -391,14 +385,6 @@ try {
                 return [];
             }
 
-            function buildCredentialHeaders() {
-                const headers = { 'Content-Type': 'application/json' };
-                if (dashboardAuthToken) headers.Authorization = 'Bearer ' + dashboardAuthToken;
-                if (dashboardUserId) headers['X-User-Id'] = dashboardUserId;
-                if (dashboardSessionToken) headers['X-Session-Token'] = dashboardSessionToken;
-                return headers;
-            }
-
             function setSearchBusy(isBusy) {
                 searchBtn.disabled = isBusy;
                 searchInput.disabled = isBusy;
@@ -423,24 +409,13 @@ try {
                     return;
                 }
 
-                if (!dashboardAuthToken || !dashboardUserId || !dashboardSessionToken) {
-                    searchError.style.display = 'block';
-                    searchError.innerHTML = '<strong>Session credentials are missing.</strong> Login again to refresh the dashboard session.';
-                    return;
-                }
-
                 setSearchBusy(true);
 
                 try {
                     const res = await fetch(searchEndpoint, {
                         method: 'POST',
-                        headers: buildCredentialHeaders(),
-                        body: JSON.stringify({
-                            stext,
-                            exch,
-                            user_id: dashboardUserId,
-                            session_token: dashboardSessionToken
-                        })
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ stext, exch })
                     });
 
                     const text = await res.text();
@@ -509,22 +484,8 @@ try {
                     displayArea.style.display = 'none';
                     loader.style.display = 'block';
 
-                    if (!dashboardAuthToken || !dashboardUserId || !dashboardSessionToken) {
-                        loader.style.display = 'none';
-                        displayArea.style.display = 'block';
-                        displayArea.innerHTML = '<span style="color:var(--error-color)">Session credentials are missing. Login again to refresh the dashboard session.</span>';
-                        return;
-                    }
-
                     try {
-                        const res = await fetch('fetch_margin.php', {
-                            method: 'POST',
-                            headers: buildCredentialHeaders(),
-                            body: JSON.stringify({
-                                user_id: dashboardUserId,
-                                session_token: dashboardSessionToken
-                            })
-                        });
+                        const res = await fetch('fetch_margin.php');
                         const data = await res.json();
                         loader.style.display = 'none';
                         displayArea.style.display = 'block';
@@ -574,10 +535,11 @@ try {
                     try {
                         const res = await fetch('api/place_order.php', {
                             method: 'POST',
-                            headers: buildCredentialHeaders(),
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': 'Bearer ' + dashboardAuthToken
+                            },
                             body: JSON.stringify({
-                                user_id: dashboardUserId,
-                                session_token: dashboardSessionToken,
                                 exch: 'NSE',
                                 tsym: 'ACC-EQ',
                                 qty: '1',
@@ -606,4 +568,3 @@ try {
     </script>
 </body>
 </html>
-

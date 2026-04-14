@@ -91,11 +91,19 @@ try {
         try {
             $redis = new Redis();
             $redis->connect($redis_host, $redis_port, 2.0);
+            $sessionBundle = json_encode([
+                'client_id' => $client_id,
+                'access_token' => $access_token,
+                'header_auth_token' => $header_auth_token,
+                'updated_at' => date('Y-m-d H:i:s'),
+                'cached_at' => time(),
+            ], JSON_UNESCAPED_SLASHES);
+            $redis->setex('ft_session_bundle:' . $user_id, 3600, $sessionBundle);
             $redis->setex('ft_session_token:' . $user_id, 3600, $access_token);
             $redis->setex(
                 'flattrade_auth:' . hash('sha1', $header_auth_token),
                 86400,
-                json_encode(['client_id' => $client_id])
+                json_encode(['client_id' => $client_id], JSON_UNESCAPED_SLASHES)
             );
         } catch (Throwable) {
             // Ignore Redis write failures during callback; MySQL remains the source of truth.
@@ -109,3 +117,4 @@ try {
     header('Location: index.php?error=' . urlencode($e->getMessage()));
     exit;
 }
+
