@@ -92,10 +92,10 @@ try {
                 'access_token' => $access_token,
                 'header_auth_token' => $header_auth_token,
                 'updated_at' => date('Y-m-d H:i:s'),
-                'cached_at' => time(),
+                'last_updated' => time(),
             ], JSON_UNESCAPED_SLASHES);
-            $redis->setex('ft_session_bundle:' . $user_id, 3600, $sessionBundle);
-            $redis->setex('ft_session_token:' . $user_id, 3600, $access_token);
+            $redis->setex('ft_session_bundle:' . $user_id, 86400, $sessionBundle);
+            $redis->setex('ft_session_token:' . $user_id, 86400, $access_token);
             $redis->setex(
                 'flattrade_auth:' . hash('sha1', $header_auth_token),
                 86400,

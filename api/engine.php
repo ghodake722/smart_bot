@@ -81,17 +81,17 @@ function ft_normalize_session_row(array $row): array
         'access_token' => (string)($row['access_token'] ?? ''),
         'header_auth_token' => (string)($row['header_auth_token'] ?? ''),
         'updated_at' => (string)($row['updated_at'] ?? date('Y-m-d H:i:s')),
-        'cached_at' => (int)($row['cached_at'] ?? time()),
+        'last_updated' => (int)($row['last_updated'] ?? time()),
     ];
 }
 
 function ft_is_session_bundle_fresh(array $bundle): bool
 {
-    $cachedAt = (int)($bundle['cached_at'] ?? 0);
-    return $cachedAt > 0 && (time() - $cachedAt) < FT_SESSION_MAX_AGE;
+    $lastUpdated = (int)($bundle['last_updated'] ?? 0);
+    return $lastUpdated > 0 && (time() - $lastUpdated) < FT_SESSION_MAX_AGE;
 }
 
-function ft_cache_session_token(string $token, int $ttl = FT_TOKEN_TTL): void
+function ft_cache_session_token(string $token, int $ttl = FT_REDIS_TTL): void
 {
     $redis = RedisPool::get();
     if ($redis === null || $token === '') {
@@ -134,9 +134,10 @@ function ft_cache_auth_identity(string $bearerToken, string $clientId): void
     }
 }
 
-function ft_cache_session_bundle(array $row, int $ttl = FT_TOKEN_TTL): array
+function ft_cache_session_bundle(array $row, int $ttl = FT_REDIS_TTL): array
 {
     $bundle = ft_normalize_session_row($row);
+    $bundle['last_updated'] = time(); // Always stamp with current time on cache write
     $redis = RedisPool::get();
     if ($redis !== null) {
         try {
@@ -175,8 +176,8 @@ function ft_get_latest_session_row(): array
 
 function ft_refresh_session_from_db(): array
 {
-    $bundle = ft_cache_session_bundle(ft_get_latest_session_row(), FT_TOKEN_TTL);
-    ft_audit_log('TOKEN_REFRESH', 'Credentials fetched from MySQL and cached in Redis (TTL: ' . FT_TOKEN_TTL . 's)', 'mysql', FT_TOKEN_TTL);
+    $bundle = ft_cache_session_bundle(ft_get_latest_session_row(), FT_REDIS_TTL);
+    ft_audit_log('TOKEN_REFRESH', 'Credentials fetched from MySQL and cached in Redis (TTL: ' . FT_REDIS_TTL . 's, last_updated: ' . $bundle['last_updated'] . ')', 'mysql', FT_REDIS_TTL);
     return $bundle;
 }
 
