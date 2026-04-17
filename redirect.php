@@ -56,7 +56,6 @@ try {
 
     $client_id = $data['client'] ?? '';
     $access_token = $data['token'] ?? '';
-    $header_auth_token = bin2hex(random_bytes(32));
 
     if (empty($client_id) || empty($access_token)) {
         throw new Exception('API returned Ok but missing client/token fields');
@@ -69,12 +68,22 @@ try {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
 
+    // Read existing header_auth_token — it is immutable once set
+    $existing = $pdo->prepare(
+        'SELECT header_auth_token FROM flattrade_tokens WHERE client_id = :cid LIMIT 1'
+    );
+    $existing->execute([':cid' => $client_id]);
+    $existingRow = $existing->fetch(PDO::FETCH_ASSOC);
+    $header_auth_token = (!empty($existingRow['header_auth_token']))
+        ? $existingRow['header_auth_token']
+        : bin2hex(random_bytes(32)); // Only generate on first-ever login
+
+    // Upsert: set header_auth_token only on INSERT, never overwrite on UPDATE
     $stmt = $pdo->prepare(
         'INSERT INTO flattrade_tokens (client_id, access_token, header_auth_token)
          VALUES (:cid, :tok, :hat)
          ON DUPLICATE KEY UPDATE
          access_token = VALUES(access_token),
-         header_auth_token = VALUES(header_auth_token),
          updated_at = CURRENT_TIMESTAMP'
     );
     $stmt->execute([

@@ -37,18 +37,6 @@ try {
         $dashboardAuthToken = $tokenRow['header_auth_token'] ?? null;
         $dashboardUserId = $tokenRow['client_id'] ?? null;
         $dashboardSessionToken = $tokenRow['access_token'] ?? null;
-        if (!$dashboardAuthToken) {
-            $dashboardAuthToken = bin2hex(random_bytes(32));
-            $update = $pdo->prepare(
-                'UPDATE flattrade_tokens
-                 SET header_auth_token = :hat
-                 WHERE id = :id'
-            );
-            $update->execute([
-                ':hat' => $dashboardAuthToken,
-                ':id' => $tokenRow['id'],
-            ]);
-        }
     }
 } catch (Throwable $e) {
     // Keep dashboard usable even when DB health checks fail.
