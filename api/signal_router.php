@@ -50,10 +50,23 @@ if ($action === 'place') {
     }
 }
 
-$signal = array_merge([
+$cleanPayload = [
     'uid' => $session['client_id'],
     'actid' => $session['client_id']
-], $signal);
+];
+
+$allowedFields = [
+    'exch', 'tsym', 'qty', 'prc', 'prd', 'trantype', 'prctyp', 'ret', 
+    'norenordno', 'trgprc', 'dscqty', 'pCode', 'amo'
+];
+
+foreach ($allowedFields as $field) {
+    if (isset($signal[$field])) {
+        $cleanPayload[$field] = $signal[$field];
+    }
+}
+
+$signal = $cleanPayload;
 
 $requestId = bin2hex(random_bytes(8));
 ft_early_response($requestId);
