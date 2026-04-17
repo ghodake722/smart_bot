@@ -50,8 +50,10 @@ if ($action === 'place') {
     }
 }
 
-$signal['uid'] = $session['client_id'];
-$signal['actid'] = $session['client_id'];
+$signal = array_merge([
+    'uid' => $session['client_id'],
+    'actid' => $session['client_id']
+], $signal);
 
 $requestId = bin2hex(random_bytes(8));
 ft_early_response($requestId);
