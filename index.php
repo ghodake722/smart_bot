@@ -560,10 +560,11 @@ try {
                     }
 
                     try {
-                        const res = await fetch('api/place_order.php', {
+                        const res = await fetch('api/signal_router.php', {
                             method: 'POST',
                             headers: buildCredentialHeaders(),
                             body: JSON.stringify({
+                                action: 'place',
                                 user_id: dashboardUserId,
                                 session_token: dashboardSessionToken,
                                 exch: 'NSE',

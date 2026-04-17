@@ -53,26 +53,6 @@ function ft_auth_cache_key(string $bearerToken): string
     return 'flattrade_auth:' . hash('sha1', $bearerToken);
 }
 
-function ft_is_https_request(): bool
-{
-    $https = $_SERVER['HTTPS'] ?? '';
-    return $https !== '' && strtolower((string)$https) !== 'off';
-}
-
-function ft_set_dashboard_auth_cookie(string $token): void
-{
-    if ($token === '' || headers_sent()) {
-        return;
-    }
-
-    setcookie(FT_AUTH_COOKIE, $token, [
-        'expires' => time() + FT_REDIS_TTL,
-        'path' => '/',
-        'secure' => ft_is_https_request(),
-        'httponly' => true,
-        'samesite' => 'Lax',
-    ]);
-}
 
 function ft_normalize_session_row(array $row): array
 {
@@ -252,10 +232,6 @@ function ft_resolve_session_token(bool $forceRefresh = false): string
     return (string)ft_resolve_session_bundle($forceRefresh)['access_token'];
 }
 
-function ft_fast_token(): string
-{
-    return (string)ft_fast_session_bundle()['access_token'];
-}
 
 final class RedisPool
 {
@@ -547,12 +523,4 @@ function ft_fetch_margin(array $session): array
         'uid' => (string)$session['client_id'],
         'actid' => (string)$session['client_id'],
     ], (string)$session['access_token'], false, false);
-}
-
-function ft_place_order(array $payload, array $session, bool $echo = true): array
-{
-    $payload['uid'] = (string)$session['client_id'];
-    $payload['actid'] = (string)$session['client_id'];
-
-    return ft_dispatch('PlaceOrder', $payload, (string)$session['access_token'], $echo, false);
 }
