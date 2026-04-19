@@ -218,13 +218,18 @@ function ft_resolve_session_bundle(bool $forceRefresh = false): array
 function ft_fast_session_bundle(): array
 {
     $bundle = ft_get_cached_session_bundle(false);
-    if ($bundle === null) {
-        http_response_code(401);
-        echo '{"s":"error","m":"Unauthorized: Search once or login again to warm Redis credentials"}';
-        exit;
+    if ($bundle !== null) {
+        return $bundle;
     }
 
-    return $bundle;
+    // Redis unavailable or cold-start — fall back to MySQL silently
+    try {
+        return ft_refresh_session_from_db();
+    } catch (\Throwable) {
+        http_response_code(401);
+        echo '{"s":"error","m":"Unauthorized: No active session. Please login with Flattrade."}';
+        exit;
+    }
 }
 
 function ft_resolve_session_token(bool $forceRefresh = false): string
@@ -333,7 +338,15 @@ function ft_enforce_method(string $expected): void
     }
 }
 
-function ft_extract_bearer(): string
+/**
+ * Extract bearer token from Authorization header, X-Auth-Token header, cookie,
+ * or (as a fallback) from a pre-read JSON body string passed by the caller.
+ *
+ * IMPORTANT: callers that have already read php://input must pass the raw body
+ * here so we do not attempt a second read of the stream.
+ * @param string|null $rawBody Pre-read request body (optional)
+ */
+function ft_extract_bearer(?string $rawBody = null): string
 {
     if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
         $value = (string)$_SERVER['HTTP_AUTHORIZATION'];
@@ -348,12 +361,12 @@ function ft_extract_bearer(): string
         return (string)$_COOKIE[FT_AUTH_COOKIE];
     }
 
-    // Fallback: check raw JSON payload for 'session_token' field (useful for local Postman/Python clients lacking header controls)
-    $input = file_get_contents('php://input');
-    if ($input) {
-        $signal = json_decode($input, true);
-        if (is_array($signal) && !empty($signal['session_token'])) {
-            return (string)$signal['session_token'];
+    // Fallback: check pre-read body for 'session_token' (Postman / Python webhook clients)
+    // Caller must supply $rawBody — we never re-read php://input here (it is a read-once stream)
+    if ($rawBody !== null && $rawBody !== '') {
+        $parsed = json_decode($rawBody, true);
+        if (is_array($parsed) && !empty($parsed['session_token'])) {
+            return (string)$parsed['session_token'];
         }
     }
 
@@ -443,21 +456,31 @@ function ft_is_session_expired_payload(array $data): bool
     );
 }
 
-function ft_dispatch(string $endpoint, array $payload, string $jKey, bool $echo = false, bool $allowRetry = true): array
+/**
+ * Dispatch a signed request to the Flattrade PiConnect API.
+ *
+ * @param string $requestId  Caller's trace ID — passed through for debug logging.
+ */
+function ft_dispatch(string $endpoint, array $payload, string $jKey, bool $echo = false, bool $allowRetry = true, string $requestId = ''): array
 {
+    // Build jData string explicitly so we can log the exact bytes sent to Flattrade
+    $jData = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
     $ch = CurlPool::get();
     curl_setopt($ch, CURLOPT_URL, FT_BROKER_BASE . $endpoint);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, 'jData=' . json_encode($payload) . '&jKey=' . $jKey);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, 'jData=' . $jData . '&jKey=' . $jKey);
 
     $t0 = hrtime(true);
     $response = curl_exec($ch);
     $t1 = hrtime(true);
 
-    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $httpCode  = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $latencyUs = (int)(($t1 - $t0) / 1000);
 
     if ($response === false) {
-        $result = ['s' => 'error', 'm' => 'cURL failure', 'code' => 502];
+        $curlErr = curl_error($ch);
+        ft_order_debug_log($requestId, $endpoint, $jData, $jKey, 0, 'curl_error:' . $curlErr, $latencyUs);
+        $result = ['s' => 'error', 'm' => 'cURL failure: ' . $curlErr, 'code' => 502];
         if ($echo) {
             http_response_code(502);
             echo json_encode($result);
@@ -465,28 +488,33 @@ function ft_dispatch(string $endpoint, array $payload, string $jKey, bool $echo 
         return $result;
     }
 
-    $data = json_decode($response, true) ?? [];
+    $rawResponse = (string)$response;
+    $data        = json_decode($rawResponse, true) ?? [];
+
     if ($allowRetry && ft_is_session_expired_payload($data)) {
         ft_audit_log('TOKEN_ERROR', 'Broker rejected cached session key - refreshing from MySQL', 'redis');
         ft_delete_session_cache();
         try {
             $freshToken = ft_resolve_session_token(true);
             if ($freshToken !== '') {
-                return ft_dispatch($endpoint, $payload, $freshToken, $echo, false);
+                return ft_dispatch($endpoint, $payload, $freshToken, $echo, false, $requestId);
             }
         } catch (\Throwable) {
             // Return original broker error below.
         }
     }
 
-    $isOk = ($data['stat'] ?? $data['status'] ?? '') === 'Ok';
+    $isOk  = ($data['stat'] ?? $data['status'] ?? '') === 'Ok';
     $result = [
-        's' => $isOk ? 'success' : 'error',
-        'm' => $isOk ? 'Broker confirmed' : ($data['emsg'] ?? 'Broker rejected'),
-        'data' => $data,
-        'code' => $httpCode,
+        's'          => $isOk ? 'success' : 'error',
+        'm'          => $isOk ? 'Broker confirmed' : ($data['emsg'] ?? 'Broker rejected'),
+        'data'       => $data,
+        'code'       => $httpCode,
         'latency_us' => $latencyUs,
     ];
+
+    // Always log the outbound payload and raw broker response for diagnostics
+    ft_order_debug_log($requestId, $endpoint, $jData, $jKey, $httpCode, $rawResponse, $latencyUs);
 
     if ($echo) {
         http_response_code($isOk ? 200 : ($httpCode >= 400 ? $httpCode : 400));
@@ -516,6 +544,55 @@ function ft_log_order(string $request_id, string $endpoint, array $payload, arra
         // Logging must never block requests.
     }
 }
+
+/**
+ * Append a structured debug line to logs/order_debug.log.
+ * Captures: timestamp (IST), requestId, endpoint, masked jKey, full jData (uid/actid visible),
+ * raw broker response, HTTP code, latency, and client origin.
+ * Called from ft_dispatch() — must NEVER throw or block.
+ */
+function ft_order_debug_log(
+    string $requestId,
+    string $endpoint,
+    string $jData,
+    string $jKey,
+    int    $httpCode,
+    string $rawResponse,
+    int    $latencyUs
+): void {
+    try {
+        $logDir = dirname(__DIR__) . '/logs';
+        if (!is_dir($logDir)) {
+            @mkdir($logDir, 0750, true);
+        }
+
+        // Mask jKey: retain only last 6 chars to protect session tokens in log files
+        $maskedKey = strlen($jKey) > 6
+            ? str_repeat('*', strlen($jKey) - 6) . substr($jKey, -6)
+            : str_repeat('*', strlen($jKey));
+
+        $origin = ($_SERVER['REMOTE_ADDR'] ?? 'cli')
+            . ' ' . ($_SERVER['HTTP_USER_AGENT'] ?? '-');
+
+        $line = sprintf(
+            "[%s] reqId=%-18s ep=%-14s http=%d lat=%7dus key=%s origin=%s | jData=%s | resp=%s\n",
+            date('Y-m-d H:i:s'),
+            $requestId ?: '-',
+            $endpoint,
+            $httpCode,
+            $latencyUs,
+            $maskedKey,
+            $origin,
+            $jData,
+            $rawResponse
+        );
+
+        file_put_contents($logDir . '/order_debug.log', $line, FILE_APPEND | LOCK_EX);
+    } catch (\Throwable) {
+        // Logging must never interrupt trading requests.
+    }
+}
+
 
 function ft_search_scrip(string $stext, string $exch, array $session): array
 {
