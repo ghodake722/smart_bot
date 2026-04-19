@@ -348,6 +348,15 @@ function ft_extract_bearer(): string
         return (string)$_COOKIE[FT_AUTH_COOKIE];
     }
 
+    // Fallback: check raw JSON payload for 'session_token' field (useful for local Postman/Python clients lacking header controls)
+    $input = file_get_contents('php://input');
+    if ($input) {
+        $signal = json_decode($input, true);
+        if (is_array($signal) && !empty($signal['session_token'])) {
+            return (string)$signal['session_token'];
+        }
+    }
+
     http_response_code(401);
     echo '{"s":"error","m":"Unauthorized: No dashboard auth token"}';
     exit;

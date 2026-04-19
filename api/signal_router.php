@@ -16,10 +16,8 @@ if (!is_array($signal)) {
 
 $session = ft_authenticate_fast(ft_extract_bearer());
 
-if (!$signal || !isset($signal['action'])) {
-    http_response_code(400);
-    echo '{"s":"error","m":"Invalid signal: missing JSON body or action field"}';
-    exit;
+if (!isset($signal['action'])) {
+    $signal['action'] = 'place';
 }
 
 $action = strtolower(trim($signal['action']));
@@ -42,7 +40,7 @@ if (($action === 'cancel' || $action === 'modify') && empty($signal['norenordno'
 
 if ($action === 'place') {
     $required = ['exch', 'tsym', 'qty', 'prc', 'prd', 'trantype', 'prctyp', 'ret'];
-    $missing = array_filter($required, fn($field) => empty($signal[$field]));
+    $missing = array_filter($required, fn($field) => !isset($signal[$field]) || $signal[$field] === '');
     if ($missing) {
         http_response_code(400);
         echo json_encode(['s' => 'error', 'm' => 'Missing: ' . implode(', ', $missing)]);
@@ -62,7 +60,7 @@ $allowedFields = [
 
 foreach ($allowedFields as $field) {
     if (isset($signal[$field])) {
-        $cleanPayload[$field] = $signal[$field];
+        $cleanPayload[$field] = (string)$signal[$field];
     }
 }
 
